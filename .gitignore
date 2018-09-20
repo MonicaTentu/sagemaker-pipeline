@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+cicd_pipeline_old.yaml
+test.py
+sandbox_main.txt
+test_func.sh
+error.json
+list_of_commands_On_EC2_instance
+AWS KEYS
+run_example.py
+random_test.txt
+lambdas.py
+new_lambda_sagemaker_trigger.yaml
+cicd-pipeline-v1.yaml
+sagemaker-pipeline.yaml
+original_lambda_sagemaker_trigger.py
+images/stack-resources.png

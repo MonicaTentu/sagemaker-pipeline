@@ -1,0 +1,716 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  CICD Pipeline for SageMaker Training
+Parameters:
+  Email:
+    Description: The Email Address that notifications are sent to
+    Type: String
+
+  GitHubUser:
+    Type: String
+    Description: Your username or organization name on GitHub.
+
+  GitHubRepo:
+    Type: String
+    Default: tf-gamesbiz
+    Description: The repo name of the sample service.
+
+  GitHubBranch:
+    Type: String
+    Default: dev
+    Description: The branch of the repo to continuously deploy.
+
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: >
+      Token for the user specified above. (https://github.com/settings/tokens)
+
+  SyntheticBucketName:
+    Type: String
+    Description: >
+      This is the bucket name for the bucket holding the synthetic data for models and is indexed 
+      by gitrepo name of each model e.g. <SyntheticBucketName>/<GitRepo>/<SomePartialKey>/*.csv
+    Default: synthetic-data-bkt
+
+  BuildTimeoutMins:
+    Type: Number
+    Description: Time out Limit in Minutes for CodeBuild  
+    Default: 30
+
+  PythonBuildVersion:
+    Default: aws/codebuild/python:3.6.5-1.3.2
+    Type: String
+    Description: Python Version for the Linux Container in CodeBuild
+    AllowedValues: 
+      - aws/codebuild/python:3.6.5-1.3.2
+      - aws/codebuild/python:2.7.12
+
+  InstanceCount:
+    Description: Number of Training Instances for SageMaker
+    Type: Number
+    Default: 1
+
+  InstanceType:
+    Description: Type of SageMaker Compute Instance
+    Type: String
+    Default: ml.m4.4xlarge
+
+  MaxRuntimeInSeconds:
+    Type: Number
+    Default: 86400
+
+  VolInGB:
+    Description: This is the Volume in GB for each SageMaker Instance
+    Type: Number
+    Default: 30
+
+Metadata:
+  AWS::CloudFormation::Interface:
+
+    ParameterLabels:
+      Email:
+        default: "Email for SNS Notification"
+      GitHubUser:
+        default: "GitHub Username"
+      GitHubRepo:
+        default: "GitHub Repository"
+      GitHubBranch:
+        default: "Repository Branch"
+      GitHubToken:
+        default: "Personal Access Token"
+      PythonBuildVersion:
+        default: "Select which version of Python applies to CodeBuild Project"
+      BuildTimeoutMins:
+        default: "Enter the Timeout limit (in minutes) for CodeBuild Project"
+      InstanceCount:
+        default: "Number of SageMaker Training Instances"
+      InstanceType:
+        default: "The Type of Instance for SageMaker Training Job"
+      SyntheticBucketName:
+        default: "The name for the S3 input bucket which holds synthetic data"
+
+    ParameterGroups:
+      - Label:
+          default: Notification Configuration
+        Parameters:
+          - Email
+      - Label:
+          default: GitHub Configuration
+        Parameters:
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubUser
+          - GitHubToken
+      - Label:
+          default: Synthetic Data S3 Bucket Configuration
+        Parameters:
+          - SyntheticBucketName
+      - Label:
+          default: AWS CodeBuild Configuration
+        Parameters:
+          - PythonBuildVersion
+          - BuildTimeoutMins          
+      - Label:
+          default: Amazon SageMaker Configuration
+        Parameters:
+          - InstanceCount
+          - InstanceType
+          - VolInGB
+          - MaxRuntimeInSeconds
+
+Resources:
+  MetaDataStore:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions: 
+        - AttributeName: "training_job_name"
+          AttributeType: "S"
+      KeySchema: 
+        - AttributeName: "training_job_name"
+          KeyType: "HASH"
+      ProvisionedThroughput: 
+        ReadCapacityUnits: "10"
+        WriteCapacityUnits: "5"
+
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+
+  ModelArtifactBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LambdaInvokeOutputPermission
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-output-artifact
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Function: !GetAtt LambdaOutputTrigger.Arn
+            Event: "s3:ObjectCreated:*"        
+
+  LambdaInvokeOutputPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaOutputTrigger.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub arn:aws:s3:::${AWS::StackName}-output-artifact
+
+  PipelineEndSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AWS::StackName}-end-topic
+      Subscription:
+        - Endpoint: !Ref Email
+          Protocol: email
+
+  TrainingInputBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LambdaInvokePermission
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-input-data
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:    
+        LambdaConfigurations:
+          - Function: !GetAtt LambdaBuildTrigger.Arn
+            Event: "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: Prefix
+                    Value: input/data/training
+                  - Name: Suffix
+                    Value: hyperparameters.json      
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaBuildTrigger.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub arn:aws:s3:::${AWS::StackName}-input-data
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+                  - ec2:*
+                  - lambda:*
+                  - iam:PassRole
+              - Resource: !Sub arn:aws:s3:::${TrainingInputBucket}*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                  - s3:ListObjects
+              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${Repository}
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+      Path: /
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess 
+
+  LambdaServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - Effect: Allow
+            Principal: 
+              Service: 
+                - lambda.amazonaws.com
+                - sagemaker.amazonaws.com
+                - codebuild.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaVPCRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:GetLogEvents
+                  - logs:PutLogEvents
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeDhcpOptions
+                  - iam:PassRole
+                  - sns:Publish
+                  - lambda:InvokeFunction
+                  - cloudformation:DescribeStacks
+                  - ec2:DetachNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
+      Path: /
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  CustomWebhookHandler:
+    Type: Custom::CustomWebhookHandler
+    Properties:
+      ServiceToken: !GetAtt LambdaWebhookFunction.Arn
+      BuildProjectName: !Ref AWS::StackName
+      BranchFilter: !Ref GitHubBranch
+      RepoName: !Ref GitHubRepo
+      AccessToken: !Ref GitHubToken
+      UserName: !Ref GitHubUser
+
+  LambdaWebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Enables Webhook Payload URL and Secret for CodeBuild and then creates the hook in GHE
+      Handler: index.lambda_handler
+      Runtime: python3.6
+      Timeout: '300'
+      Role: !GetAtt 'LambdaServiceRole.Arn'
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from botocore.vendored import requests
+          import cfnresponse
+
+          client = boto3.client('codebuild')
+
+          def lambda_handler(event, context):
+
+            build_project_name = event['ResourceProperties']['BuildProjectName']
+            source_branch = event['ResourceProperties']['BranchFilter']
+            github_repo_name = event['ResourceProperties']['RepoName']
+            access_token = event['ResourceProperties']['AccessToken']
+            github_user_name = event['ResourceProperties']['UserName']
+
+            if(event['RequestType'] == "Create"):
+              response = client.create_webhook(
+                projectName=build_project_name,
+                branchFilter=source_branch
+              )
+              res = response["webhook"]
+              webhook_endpoint = res["payloadUrl"]
+              hook_secret = res["secret"]
+              hook = {
+                u'name': u'web',
+                u'active': True,
+                u'config': {
+                  u'url': u'{}'.format(webhook_endpoint),
+                  u'content_type': u'json',
+                  u'secret': u'{}'.format(hook_secret),
+                  u'insecure_ssl': True
+                }
+              }
+              p = requests.post(
+                'https://api.github.com/repos/{}/{}/hooks'.format(github_user_name, github_repo_name),
+                json=hook,
+                headers={'Authorization': 'token ' + access_token}
+              )
+              responseData = {}
+              responseData['Data'] = p.text
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            if(event['RequestType'] == "Delete"):
+              p_del = requests.get('https://api.github.com/repos/{}/{}/hooks'.format(github_user_name, github_repo_name),
+                headers={'Authorization': 'token ' + access_token}
+              )
+              jdata = json.loads(p_del.text)
+              hook_id = jdata[0]['id']
+              p_del2 = requests.delete('https://api.github.com/repos/{}/{}/hooks/{}'.format(github_user_name, github_repo_name, str(hook_id)),
+                headers={'Authorization': 'token ' + access_token}
+              )
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData=None)
+            else:
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData=None)
+
+  CustomS3FolderHandler:
+    Type: Custom::CustomS3FolderHandler
+    DependsOn: TrainingInputBucket
+    Properties:
+      ServiceToken: !GetAtt LambdaS3FolderFunction.Arn
+      SyntheticBucketName: !Ref SyntheticBucketName
+      TrainingInputS3: !Ref TrainingInputBucket
+      TopLevelFolder: !Ref GitHubRepo
+
+  LambdaS3FolderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: On stack creation sets up the Sagemaker equivalent folder structure in Training input S3 Bucket
+      Handler: index.lambda_handler
+      Runtime: python3.6
+      Timeout: '300'
+      Role: !GetAtt 'LambdaServiceRole.Arn'
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          from botocore.vendored import requests
+          import cfnresponse
+
+          s3 = boto3.client('s3')
+
+          def lambda_handler(event, context):
+
+            input_bucket_name = str(event['ResourceProperties']['TrainingInputS3'])
+            synthetic_bucket_name = str(event['ResourceProperties']['SyntheticBucketName'])
+            top_level_folder = str(event['ResourceProperties']['TopLevelFolder'])
+
+            if(event['RequestType'] == "Create"):
+
+              synthetic_data_obj_res = s3.list_objects(Bucket=synthetic_bucket_name,
+                Marker=top_level_folder + "/", Prefix=top_level_folder + "/")
+
+              object_key_list = list()
+
+              if 'Contents' not in synthetic_data_obj_res:
+                print("synthetic-data-bucket empty for this repo")
+              else:
+                for key in synthetic_data_obj_res['Contents']:
+                  object_key_name = key['Key'][ key['Key'].find("/") + 1 : ]    
+                  object_key_list.append(str(os.path.dirname(object_key_name)))
+
+                for partial_key_name in list(set(object_key_list)):
+                  if partial_key_name=='': 
+                    input_directory_path2 = "input/data/training" + "/" 
+                    input_directory_path3 = "input/data/validation" + "/" 
+                    input_directory_path4 = "input/data/testing" + "/" 
+                  else:
+                    input_directory_path2 = "input/data/training" + "/" + partial_key_name + "/"
+                    input_directory_path3 = "input/data/validation" + "/" + partial_key_name + "/"
+                    input_directory_path4 = "input/data/testing" + "/" + partial_key_name + "/"
+
+                  input_directory_path1 = "input/config" + "/"
+
+                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path1 )
+                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path2 )
+                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path3 )
+                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path4 )
+
+              responseData = {}
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            else:             
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData=None)
+
+  LambdaBuildTrigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Checks if Codebuild project exists and then manually executes it.
+      Environment:
+        Variables:
+          'CODEBUILD_PROJ': !Ref AWS::StackName
+          'SOURCE_BRANCH': !Ref GitHubBranch
+      Handler: index.lambda_handler
+      Runtime: python3.6
+      Timeout: '300'
+      Role: !GetAtt 'LambdaServiceRole.Arn'
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          import logging
+
+          codebuild = boto3.client('codebuild')
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+
+            logger.info('got event{}'.format(event))
+
+            projectName = str(os.environ["CODEBUILD_PROJ"])
+            sourceVersion = str(os.environ["SOURCE_BRANCH"])
+
+            proj_list = codebuild.list_projects()
+
+            if projectName in proj_list['projects']:
+
+              response1 = codebuild.list_builds_for_project( projectName=projectName, sortOrder='DESCENDING',)
+
+              if not response1['ids']:
+                print('Starting Initial Build for Project')
+                response3 = codebuild.start_build(projectName=projectName, sourceVersion=sourceVersion)
+              else:
+                latest_build = response1['ids'][0]
+                response2 = codebuild.batch_get_builds(ids=[latest_build])
+                build_status = str(response2['builds'][0]['buildStatus'])
+
+                if build_status == 'IN_PROGRESS':
+                  print('Build In Progress Do Nothing')
+
+                if build_status == 'SUCCEEDED':
+                  print('Restarting Build for Project')
+                  response3 = codebuild.start_build(projectName=projectName, sourceVersion=sourceVersion)
+            else:
+              print("No CodeBuild Project Available")
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn: LambdaSageMakerTrigger
+    Properties:
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Cache: 
+        Type: NO_CACHE
+      Source: 
+        Type: GITHUB
+        InsecureSsl: true
+        Location: !Sub https://github.com/${GitHubUser}/${GitHubRepo}.git
+        GitCloneDepth: 1
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - pip install --upgrade pip
+            pre_build:
+              commands:
+                - export COMMIT_ID="${CODEBUILD_SOURCE_VERSION}"
+                - export IMG="${REPO_NAME}"
+                - export SRC_BKT_URI=s3://"${SRC_BKT_NAME}"/input/data/training/
+                - export DEST_BKT_URI=s3://"${OUTPUT_BKT}"/
+            build:
+              commands:
+                - $(aws ecr get-login --region "${AWS_DEFAULT_REGION}" --no-include-email)
+                - docker build -t "${IMG}" ./dist
+                - docker tag "${IMG}" "${FULL_NAME}"
+            post_build:
+              commands:
+                - docker push "${FULL_NAME}"
+                - PAYLOAD={\"source_bucket_uri\":\"${SRC_BKT_URI}\",\"destination_bucket_uri\":\"${DEST_BKT_URI}\",\"image\":\"${FULL_NAME}\",\"role\":\"${SAGE_ROLE_ARN}\",\"num_instances\":\"${INSTANCE_CNT}\",\"instance_type\":\"${INSTANCE_TYPE}\",\"vol_in_gb\":\"${EBS_VOL_GB}\",\"training_job_name\":\"${IMG}\",\"max_runtime_sec\":\"${RUN_TIME_SEC}\",\"git_hash\":\"${COMMIT_ID}\"}
+                - aws lambda invoke --invocation-type RequestResponse --function-name "${FUNCTION_NAME}" --region "${AWS_DEFAULT_REGION}" --payload "${PAYLOAD}" outputfile.txt
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE 
+        Image: !Ref PythonBuildVersion
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: FULL_NAME
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}:latest
+          - Name: FUNCTION_NAME
+            Value: !Ref LambdaSageMakerTrigger
+          - Name: SRC_BKT_NAME
+            Value: !Ref TrainingInputBucket
+          - Name: OUTPUT_BKT
+            Value: !Ref ModelArtifactBucket
+          - Name: SAGE_ROLE_ARN
+            Value: !GetAtt 'LambdaServiceRole.Arn'
+          - Name: INSTANCE_CNT
+            Value: !Ref InstanceCount
+          - Name: INSTANCE_TYPE
+            Value: !Ref InstanceType
+          - Name: EBS_VOL_GB
+            Value: !Ref VolInGB
+          - Name: RUN_TIME_SEC
+            Value: !Ref MaxRuntimeInSeconds
+          - Name: SYNTHETIC_DATA_BKT
+            Value: !Ref SyntheticBucketName
+          - Name: REPO_NAME
+            Value: !Sub ${GitHubRepo}
+      Name: !Ref AWS::StackName
+      ServiceRole: !Ref CodeBuildServiceRole
+      TimeoutInMinutes: !Ref BuildTimeoutMins
+      BadgeEnabled: true
+
+  LambdaSageMakerTrigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Calls the SageMaker CreateTrainingJob API
+      Environment:
+        Variables:
+          'ECR_REPO': !Ref Repository
+          'SYNTHETIC_DATA_NAME': !Ref SyntheticBucketName
+          'SRC_BKT_NAME': !Ref TrainingInputBucket
+          'META_DATA_STORE': !Ref MetaDataStore
+      Handler: index.main
+      Runtime: python3.6
+      Timeout: '300'
+      Role: !GetAtt 'LambdaServiceRole.Arn'
+      Code:
+        ZipFile: |
+          import os, json, datetime, logging, boto3
+
+          logger = logging.getLogger(); logger.setLevel(logging.INFO)
+
+          sagemaker = boto3.client('sagemaker'); s3 = boto3.client('s3'); dynamodb = boto3.client('dynamodb'); ecr = boto3.client('ecr')
+
+          def main(event, context):
+            training_job_name = str(event["training_job_name"]); response3 = s3.list_objects(Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/data/training/', Prefix='input/data/training/'); response4 = s3.list_objects(Bucket=str(os.environ["SYNTHETIC_DATA_NAME"]), Marker=training_job_name + '/', Prefix=training_job_name + '/')
+
+            def Empty_Input_Handler():
+              if 'Contents' in response4:
+                print("Copying From Synthetic Bucket")
+                for key in response4['Contents']:
+                  s = str(key['Key']); object_name = s[ s.find("/") + 1 : ]; response = s3.copy_object( Bucket=str(os.environ["SRC_BKT_NAME"]), CopySource={'Bucket': str(os.environ["SYNTHETIC_DATA_NAME"]), 'Key': s}, Key='input/data/training/'+ str(object_name))
+              else: print('No Content in Synthetic Data Bucket')
+
+            if 'Contents' in response3:
+              object_list3 = list()
+              for key in response3['Contents']:
+                object_list3.append(os.path.basename(key['Key']))
+              object_list4 = list(set(object_list3))
+              if len(object_list4) >= 1:
+                if list(set(object_list4)) != ['']: print("Training Data Exists")
+                else:
+                  print("Copying synthetic bucket"); Empty_Input_Handler()
+            else:
+              print("Copying from synthetic bucket"); Empty_Input_Handler()
+
+            response5 = s3.list_objects( Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/config/', Prefix='input/config/' ); hyper_param_dict={"foo":"bar"}
+            if 'Contents' in response5:
+              object_list5 = list()
+              for key in response5['Contents']:
+                object_list5.append(key['Key'])
+              if len(object_list5) >= 1:
+                print("Hyperparameters Already Exists"); result = s3.get_object(Bucket=str(os.environ["SRC_BKT_NAME"]), Key=object_list5[0]); text = result["Body"].read().decode(); hyper_param_dict = json.loads(text)
+            else:
+              print("Using Default Hyperparameters")
+
+            training_job_name = training_job_name + '-' + str(datetime.datetime.today()).replace(' ','-').replace(':', '-').rsplit('.')[0]
+
+            s3_key_version_dict = dict(); versions = s3.list_object_versions(Bucket = str(os.environ["SRC_BKT_NAME"]), Prefix = 'input/')
+            x = versions.get('Versions')
+            for key in x:
+              Key = key['Key']; VersionId = key['VersionId']; Size = key['Size']; IsLatest = key['IsLatest']; LastModified = key['LastModified']
+              if Size != 0:
+                if IsLatest == True:
+                  key_name = str(Key); version_id = { 'S' : str(VersionId) }; s3_key_version_dict.update({key_name:version_id})
+            dynamodb.put_item(TableName=str(os.environ["META_DATA_STORE"]), Item={'training_job_name':{ 'S' : training_job_name}, 'git_hash':{'S' : str(event["git_hash"])}, 's3_input': { 'M': s3_key_version_dict } })
+            response = sagemaker.create_training_job(TrainingJobName=training_job_name, HyperParameters=hyper_param_dict, AlgorithmSpecification={ 'TrainingImage': str(event["image"]), 'TrainingInputMode': 'File' }, RoleArn= str(event["role"]), InputDataConfig=[{ 'ChannelName': 'training', 'DataSource': { 'S3DataSource': { 'S3DataType': 'S3Prefix', 'S3Uri': str(event["source_bucket_uri"])} } }], OutputDataConfig={ 'S3OutputPath': str(event["destination_bucket_uri"]) }, ResourceConfig={ 'InstanceType': str(event["instance_type"]), 'InstanceCount': int(event["num_instances"]), 'VolumeSizeInGB': int(event["vol_in_gb"]) }, StoppingCondition={ 'MaxRuntimeInSeconds': int(event["max_runtime_sec"]) })
+
+  LambdaOutputTrigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: This is triggered by Model Artifact being created in the output artifact bucket
+      Environment:
+        Variables:
+          'META_DATA_STORE': !Ref MetaDataStore
+          'PIPELINE_END_TOPIC': !Ref PipelineEndSNSTopic
+      Handler: index.lambda_handler
+      Runtime: python3.6
+      Timeout: '300'
+      Role: !GetAtt 'LambdaServiceRole.Arn'
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          import logging
+
+          s3 = boto3.client('s3')
+          dynamodb = boto3.client('dynamodb')
+          sagemaker = boto3.client('sagemaker')
+          sns = boto3.client('sns')
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+
+            logger.info('got event{}'.format(event))
+
+            bkt_name = event['Records'][0]['s3']['bucket']['name']
+            obj_key = event['Records'][0]['s3']['object']['key']
+            version_id = event['Records'][0]['s3']['object']['versionId']
+            training_job_name = obj_key[ : obj_key.find("/")]
+
+            res = sagemaker.list_training_jobs()
+            for job in res['TrainingJobSummaries']:
+              if job['TrainingJobName'] == training_job_name:
+                job_status = str(job['TrainingJobStatus'])
+                job_creation_time = str(job['CreationTime'])
+                job_end_time = str(job['TrainingEndTime'])
+
+            dynamodb.update_item(
+              TableName=str(os.environ['META_DATA_STORE']), 
+              Key={'training_job_name': {'S':training_job_name}}, 
+              UpdateExpression="SET #job_creation_time= :val1, #job_end_time= :val2, #job_status= :val3",
+              ExpressionAttributeNames={'#job_creation_time': 'job_creation_time', '#job_end_time': 'job_end_time', '#job_status':'job_status'},
+              ExpressionAttributeValues={':val1':{ 'S':job_creation_time}, ':val2':{ 'S':job_end_time}, ':val3':{ 'S':job_status}}
+            )
+
+            sns.publish(
+                TopicArn = str(os.environ['PIPELINE_END_TOPIC']),
+                Subject = 'Model Artifact Uploaded: ' + training_job_name,
+                Message = 'File was uploaded to bucket: ' + obj_key
+            )
+
+Outputs:  
+  GithubWebhookRespose:
+    Description: This is the response output from GHE api
+    Value: !GetAtt 'CustomWebhookHandler.Data'
+
+  SageMakerTriggerLambdaArn:
+    Description: This is the ARN of Lambda Function that Kicks off the Sagemaker Training job
+    Value: !GetAtt 'LambdaSageMakerTrigger.Arn'
+
+  CodeBuildProjectArn:
+    Description: This is the Codebuild Project ARN for the deployment of this Model
+    Value: !GetAtt 'CodeBuildProject.Arn'
+
+  TrainingInputBucketArn:
+    Description: Training Input S3 Bucket
+    Value: !GetAtt 'TrainingInputBucket.Arn'
+
+  ECRepositoryArn:
+    Description: ECR repo Hosting Latest Image built by CodeBuild
+    Value: !GetAtt 'Repository.Arn'
+
+  ModelArtifactBucket:
+    Description: Model Output S3 Bucket
+    Value: !GetAtt 'ModelArtifactBucket.Arn'
+
+  DynamoMetaDataStore:
+    Description: >
+      Dynamo DB Table with each item corresponding to training job
+    Value: !GetAtt 'ModelArtifactBucket.Arn'
