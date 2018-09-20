@@ -2,6 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/../dist/.idea/dist.iml" filepath="$PROJECT_DIR$/../dist/.idea/dist.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/sagemaker-pipeline.iml" filepath="$PROJECT_DIR$/.idea/sagemaker-pipeline.iml" />
       <module fileurl="file://$PROJECT_DIR$/../tf-gamesbiz/.idea/tf-gamesbiz.iml" filepath="$PROJECT_DIR$/../tf-gamesbiz/.idea/tf-gamesbiz.iml" />
     </modules>

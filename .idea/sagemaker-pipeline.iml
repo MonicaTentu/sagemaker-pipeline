@@ -8,6 +8,7 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="tf-gamesbiz" />
     <orderEntry type="module" module-name="tf-gamesbiz" />
+    <orderEntry type="module" module-name="dist" />
   </component>
   <component name="TestRunnerService">
     <option name="PROJECT_TEST_RUNNER" value="Unittests" />

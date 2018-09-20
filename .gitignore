@@ -1,6 +1,7 @@
 .DS_Store
 .idea/
 cicd_pipeline_old.yaml
+cicd_pipeline.yaml
 test.py
 sandbox_main.txt
 test_func.sh
