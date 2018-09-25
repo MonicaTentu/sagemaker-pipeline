@@ -16,7 +16,7 @@ This pipeline is executed:
 ----
 
 
-### Step 1 Set Up AWS Account
+### Step 1: Set Up AWS Account
 
 Create an AWS account if you have not done so already and also make sure you have AWS CLI configured to create the stack from the terminal.
 You should also have the relevant permissions to be able to create IAM roles.
@@ -24,7 +24,7 @@ You should also have the relevant permissions to be able to create IAM roles.
 **Note**: You may incur cost ($) utilizing the resources that constitute this pipeline.
 
 
-### Step 2 Prepare the Training Code as Packaged Python Module
+### Step 2: Prepare the Training Code as Packaged Python Module
 
 The source code for your training algorithm should be in the form of a python package with setup.py file in the root level of a Github repository.
 Information about this Github repository, username, branch and personal access token would be provided as parameters when creating the cloudformation stack.
@@ -90,7 +90,7 @@ This additional *entry_point* argument provides all the information the pipline 
 steps that follow. Once this is done whenever you push a commit to the repo with your
 
 
-### Step 3 Create Synthetic Data Bucket
+### Step 3: Create Synthetic Data Bucket
 
 Make sure you have a "Synthetic Data Bucket" that you provided as parameter in CF template. Some sample input data should be present under the S3 key equivalent to the Github repository name i.e under '<synthetic-data-bucket>"/<Github-Repository-Name>/"
 This is not exactly a strict requirement but this type of sample data is usefull in the context of the pipeline conducting an overall integration test for the fist execution on setup.
@@ -100,7 +100,7 @@ Regardless of the first execution, whenever you upload new data to the *Training
 **Note**: The Github repository name is not the url
 
 
-### Step 4 Create Pipeline Stack
+### Step 4: Create Pipeline Stack
 
 You can either run the following bash script *./launch-cicd-pipeline.sh* . In the bash script define the environment variables as instructed below and then use aws cli command to create the stack.
 *you can view the progress of the template in the console*
@@ -131,7 +131,7 @@ aws cloudformation create-stack \
 
 ```
 
-### Step 5 Trigger and Track Execution
+### Step 5: Trigger and Track Execution
 
 Once the Stack has been successfully deployed you can trigger the pipeline by either uploading new data to the TrainingInputBucket under the input/data/ key prefix, or by
 pushing a commit to the Github repository branch specified when creating the CF stack.
@@ -145,7 +145,7 @@ Once the SageMaker Training Job finishes and model artifact is pushed to the S3 
 this is the MetaDataStore table also referenced in CloudFormation stack "output".
 
 
-### Step 6 Tear Down Stack when Needed
+### Step 6: Tear Down Stack when Needed
 
 To tear down the resources (other than ECR repo and Input and Output S3 buckets) in the stack just delete the CF stack from the cloud formation console.
 
