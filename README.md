@@ -3,10 +3,13 @@
 ![Design Overview](./images/sagemaker-pipeline.png)
 
 
+### Project Summary
+
 The aim of this project is to present candidate pipeline which continuously builds a docker image of the training algorithm and invokes a SageMaker training job based on the parameters provided during stack creation.
 This pipeline is executed:
-    1- Whenever a new commit is push to the Github repo branch (that holds your training algorithm)
-    2- Whenever a data object is created or updated in the TrainingInputBucket under the S3 keys "/input/data/"
+
+ 1- Whenever a new commit is push to the Github repo branch (that holds your training algorithm)
+ 2- Whenever a data object is created or updated in the TrainingInputBucket under the S3 keys "/input/data/"
 
 **Note**: If no data is present in the input/data/training location of the TrainingInputBucket then as explained below synthetic data is copied over to this location
 
