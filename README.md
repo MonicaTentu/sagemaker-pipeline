@@ -137,11 +137,11 @@ Once the Stack has been successfully deployed you can trigger the pipeline by ei
 pushing a commit to the Github repository branch specified when creating the CF stack.
 Either way the Source, Build, Validate Inputs and SageMaker Trigger stages in the CodePipeline are re-executed.
 
-** You can see the pipeline execution in the console via the link provided in the CloudFormation stack "output" **
+**You can see the pipeline execution in the console via the link provided in the CloudFormation stack "output"**
 
 Once the SageMaker Training Job finishes and model artifact is pushed to the S3 bucket you will recieve an email notification (assuming you suscribed to the PipelineEndSNSTopic during stack creation).
 
-** You can track the git hash, input data object version(s), along with SageMaker Training Job status/meta data in DynamoDB table**
+**You can track the git hash, input data object version(s), along with SageMaker Training Job status/meta data in DynamoDB table**
 this is the MetaDataStore table also referenced in CloudFormation stack "output".
 
 
