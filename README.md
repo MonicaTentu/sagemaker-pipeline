@@ -1,6 +1,6 @@
 ## CICD Pipeline for Training Models with Amazon SageMaker
 
-![Design Overview](./images/sagemaker-pipeline.png).
+![Design Overview](./images/sagemaker-pipeline.png)
 
 
 The aim of this project is to present candidate pipeline which continuously builds a docker image of the training algorithm and invokes a SageMaker training job based on the parameters provided during stack creation.
