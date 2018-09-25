@@ -11,7 +11,7 @@ AWS_DEFAULT_REGION=us-east-1
 aws cloudformation create-stack \
   --region ${AWS_DEFAULT_REGION} \
   --stack-name $Template_Name \
-  --template-body file://template/sagemaker-pipeline.yaml \
+  --template-body file://template/sagemaker-pipeline-v2.yaml \
   --parameters \
     ParameterKey=Email,ParameterValue=$Email \
     ParameterKey=GitHubUser,ParameterValue=$GitHub_User \
