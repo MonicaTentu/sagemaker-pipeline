@@ -21,7 +21,7 @@ You should also have the relevant permissions to be able to create IAM roles.
 **Note**: You may incur cost ($) utilizing the resources that constitute this pipeline.
 
 
-### Step 2 Prepare the Training code as python package
+### Step 2 Prepare the Training Code as Packaged Python Module
 
 The source code for your training algorithm should be in the form of a python package with setup.py file in the root level of a Github repository.
 Information about this Github repository, username, branch and personal access token would be provided as parameters when creating the cloudformation stack.
@@ -92,7 +92,7 @@ steps that follow. Once this is done whenever you push a commit to the repo with
 Make sure you have a "Synthetic Data Bucket" that you provided as parameter in CF template. Some sample input data should be present under the S3 key equivalent to the Github repository name i.e under '<synthetic-data-bucket>"/<Github-Repository-Name>/"
 This is not exactly a strict requirement but this type of sample data is usefull in the context of the pipeline conducting an overall integration test for the fist execution on setup.
 
-Regardless of the first execution, whenever you upload new data to the TrainingInputBucket the pipeline should re-execute given that its not already in progress.
+Regardless of the first execution, whenever you upload new data to the *TrainingInputBucket* the pipeline should re-execute given that its not already in progress.
 
 **Note**: The Github repository name is not the url
 
@@ -142,10 +142,16 @@ Once the SageMaker Training Job finishes and model artifact is pushed to the S3 
 this is the MetaDataStore table also referenced in CloudFormation stack "output".
 
 
+### Step 6 Tear Down Stack when Needed
+
+To tear down the resources (other than ECR repo and Input and Output S3 buckets) in the stack just delete the CF stack from the cloud formation console.
+
+
 ### Assumptions
 
 1. Some familiarity with packaging code in python is assumed
-2. Familiarity with Machine Learning
+2. Familiarity with Machine Learning is also assumed
+3. Know how to generate a Personal Access Token in Github
 
 ----
 
