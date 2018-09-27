@@ -1,11 +1,11 @@
 #!/bin/bash
-Email=<Enter your Email Address>
-GitHub_User=<Enter Github Organization Name or Github Username>
-GitHub_Repo=<Enter Name (Only) of Github Repository>
-GitHub_Branch=<Enter branch name for source for pipeline stage>
-GitHub_Token=<Enter Personal Access Token from Github>
+Email=muwaheed@amazon.com
+GitHub_User=MustafaWaheed91
+GitHub_Repo=tf-gamesbiz
+GitHub_Branch=master
+GitHub_Token=3aae36e1e16704b826d0fb6ff9bd9437b2371f51
 Python_Build_Version="aws/codebuild/python:3.6.5-1.3.2"
-Template_Name=${GitHub_Repo}-cicd-pipeline
+Template_Name=${GitHub_Repo}-sgmkr01-pipeline
 AWS_DEFAULT_REGION=us-east-1
 
 aws cloudformation create-stack \

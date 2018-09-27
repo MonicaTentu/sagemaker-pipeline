@@ -197,13 +197,11 @@ Resources:
                 Rules:
                   - Name: Prefix
                     Value: input/data/
-                  - Name: Suffix
-                    Value: hyperparameters.json
 
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !GetAtt LambdaBuildTrigger.Arn
+      FunctionName: !GetAtt 'LambdaBuildTrigger.Arn'
       Action: 'lambda:InvokeFunction'
       Principal: s3.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
@@ -313,6 +311,7 @@ Resources:
               Service:
                 - lambda.amazonaws.com
                 - sagemaker.amazonaws.com
+                - codepipeline.amazonaws.com
                 - codebuild.amazonaws.com
             Action:
               - sts:AssumeRole
@@ -341,11 +340,9 @@ Resources:
                   - sns:Publish
                   - lambda:InvokeFunction
                   - cloudformation:DescribeStacks
-                  - codepipeline:PutJobSuccessResult
-                  - codepipeline:PutJobFailureResult
-                  - codepipeline:GetJobDetails
-                  - codepipeline:PutApprovalResult
+                  - codepipeline:*
                   - s3:*
+                  - logs:*
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
@@ -353,7 +350,7 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
         - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/AWSCodePipelineFullAccess
 
   CustomS3FolderHandler:
     Type: Custom::CustomS3FolderHandler
@@ -427,7 +424,7 @@ Resources:
   LambdaBuildTrigger:
     Type: AWS::Lambda::Function
     Properties:
-      Description: Checks if Codebuild project exists and then manually executes it.
+      Description: Checks if CodePipeline pipeline exists and then manually executes it.
       Environment:
         Variables:
           'PIPELINE': !Ref 'AWS::StackName'
@@ -449,19 +446,21 @@ Resources:
 
           def lambda_handler(event, context):
             logger.info('got event {}'.format(event))
+
             pipelineName = str(os.environ["PIPELINE"])
             response = codepipeline.list_pipelines()
 
             pipeline_list = []
-            for pipe in response['pipelines']:
-              pipeline_list.append(pipe['Name'])
 
-            if pipelineName in pipline_list:
-              response1 = codepipeline.list_pipeline_executions(pipelineName)
+            for pipe in response['pipelines']:
+              pipeline_list.append(pipe['name'])
+
+            if pipelineName in pipeline_list:
+              response1 = codepipeline.list_pipeline_executions(pipelineName=str(pipelineName))
 
               if not response1['pipelineExecutionSummaries'][0]:
                 print('Kick off a new pipeline execution')
-                codepipeline.start_pipeline_execution(pipelineName)
+                codepipeline.start_pipeline_execution(pipelineName=str(pipelineName))
               else:
                 latest_execution = response1['pipelineExecutionSummaries'][0]
                 execution_status = str(latest_execution['status'])
@@ -471,7 +470,7 @@ Resources:
 
                 if execution_status == 'Succeeded':
                   print('Restarting execution for Pipeline')
-                  codepipeline.start_pipeline_execution(pipelineName)
+                  codepipeline.start_pipeline_execution(name=str(pipelineName))
             else:
               print("No Pipeline Execution Available")
 
@@ -833,14 +832,14 @@ Outputs:
   ModelArtifactBucket:
     Description: >
       SageMaker Model Output S3 bucket
-    Value: !GetAtt 'ModelArtifactBucket.Arn'
+    Value: !Sub https://console.aws.amazon.com/s3/buckets/${ModelArtifactBucket}/?region=${AWS::Region}
 
   TrainingInputBucket:
     Description: >
       SageMaker Training Input S3 bucket
-    Value: !GetAtt 'TrainingInputBucket.Arn'
+    Value: !Sub https://console.aws.amazon.com/s3/buckets/${TrainingInputBucket}/?region=${AWS::Region}
 
-  MetaDataStore:
+  PipelineMetaDataStore:
     Description: >
       DynamoDB Table tracking pipeline artifacts
-    Value: !GetAtt 'ModelArtifactBucket.Arn'
+    Value: !Sub https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${MetaDataStore};tab=items
