@@ -27,12 +27,12 @@ Parameters:
     Description: >
       Token for the user specified above. (https://github.com/settings/tokens)
 
-  SyntheticBucketName:
-    Type: String
-    Description: >
-      This is the bucket name for the bucket holding the synthetic data for models and is indexed
-      by gitrepo name of each model e.g. <SyntheticBucketName>/<GitRepo>/<SomePartialKey>/*.csv
-    Default: synthetic-data-bkt
+#  SyntheticBucketName:
+#    Type: String
+#    Description: >
+#      This is the bucket name for the bucket holding the synthetic data for models and is indexed
+#      by gitrepo name of each model e.g. <SyntheticBucketName>/<GitRepo>/<SomePartialKey>/*.csv
+#    Default: synthetic-data-bkt
 
   BuildTimeoutMins:
     Type: Number
@@ -96,8 +96,8 @@ Metadata:
       InstanceType:
         default: "The Type of Instance for SageMaker Training Job"
 
-      SyntheticBucketName:
-        default: "The name for the S3 input bucket which holds synthetic data"
+#      SyntheticBucketName:
+#        default: "The name for the S3 input bucket which holds synthetic data"
 
     ParameterGroups:
       - Label:
@@ -113,10 +113,10 @@ Metadata:
           - GitHubUser
           - GitHubToken
 
-      - Label:
-          default: Synthetic Data S3 Bucket Configuration
-        Parameters:
-          - SyntheticBucketName
+#      - Label:
+#          default: Synthetic Data S3 Bucket Configuration
+#        Parameters:
+#          - SyntheticBucketName
 
       - Label:
           default: AWS CodeBuild Configuration
@@ -341,8 +341,10 @@ Resources:
                   - lambda:InvokeFunction
                   - cloudformation:DescribeStacks
                   - codepipeline:*
-                  - s3:*
+                  - codepipeline:PutJobSuccessResult
+                  - codepipeline:PutJobFailureResult
                   - logs:*
+                  - s3:*
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
@@ -357,9 +359,7 @@ Resources:
     DependsOn: TrainingInputBucket
     Properties:
       ServiceToken: !GetAtt LambdaS3FolderFunction.Arn
-      SyntheticBucketName: !Ref SyntheticBucketName
       TrainingInputS3: !Ref TrainingInputBucket
-      TopLevelFolder: !Ref GitHubRepo
 
   LambdaS3FolderFunction:
     Type: AWS::Lambda::Function
@@ -382,39 +382,18 @@ Resources:
           def lambda_handler(event, context):
 
             input_bucket_name = str(event['ResourceProperties']['TrainingInputS3'])
-            synthetic_bucket_name = str(event['ResourceProperties']['SyntheticBucketName'])
-            top_level_folder = str(event['ResourceProperties']['TopLevelFolder'])
 
             if(event['RequestType'] == "Create"):
 
-              synthetic_data_obj_res = s3.list_objects(Bucket=synthetic_bucket_name,
-                Marker=top_level_folder + "/", Prefix=top_level_folder + "/")
+              input_directory_path2 = "input/data/training" + "/"
+              input_directory_path3 = "input/data/validation" + "/"
+              input_directory_path4 = "input/data/testing" + "/"
+              input_directory_path1 = "input/config" + "/"
 
-              object_key_list = list()
-
-              if 'Contents' not in synthetic_data_obj_res:
-                print("synthetic-data-bucket empty for this repo")
-              else:
-                for key in synthetic_data_obj_res['Contents']:
-                  object_key_name = key['Key'][ key['Key'].find("/") + 1 : ]
-                  object_key_list.append(str(os.path.dirname(object_key_name)))
-
-                for partial_key_name in list(set(object_key_list)):
-                  if partial_key_name=='':
-                    input_directory_path2 = "input/data/training" + "/"
-                    input_directory_path3 = "input/data/validation" + "/"
-                    input_directory_path4 = "input/data/testing" + "/"
-                  else:
-                    input_directory_path2 = "input/data/training" + "/" + partial_key_name + "/"
-                    input_directory_path3 = "input/data/validation" + "/" + partial_key_name + "/"
-                    input_directory_path4 = "input/data/testing" + "/" + partial_key_name + "/"
-
-                  input_directory_path1 = "input/config" + "/"
-
-                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path1 )
-                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path2 )
-                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path3 )
-                  s3.put_object(Bucket=input_bucket_name, Key=input_directory_path4 )
+              s3.put_object(Bucket=input_bucket_name, Key=input_directory_path1 )
+              s3.put_object(Bucket=input_bucket_name, Key=input_directory_path2 )
+              s3.put_object(Bucket=input_bucket_name, Key=input_directory_path3 )
+              s3.put_object(Bucket=input_bucket_name, Key=input_directory_path4 )
 
               responseData = {}
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
@@ -573,7 +552,6 @@ Resources:
       Environment:
         Variables:
           'ECR_REPO': !Ref Repository
-          'SYNTHETIC_DATA_NAME': !Ref SyntheticBucketName
           'SRC_BKT_NAME': !Ref TrainingInputBucket
           'META_DATA_STORE': !Ref MetaDataStore
           'IMG': !Sub ${GitHubRepo}
@@ -594,13 +572,9 @@ Resources:
           s3 = boto3.client('s3')
 
           def main(event, context):
+            job_id = event['CodePipeline.job']['id']
             try:
-              job_id = event['CodePipeline.job']['id']
-
-              training_job_name = str(os.environ["IMG"])
-              response3 = s3.list_objects(Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/data/training/', Prefix='input/data/training/')
-              response4 = s3.list_objects(Bucket=str(os.environ["SYNTHETIC_DATA_NAME"]), Marker=training_job_name + '/', Prefix=training_job_name + '/')
-
+              response3 = s3.list_objects(Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/data/', Prefix='input/data/')
               if 'Contents' in response3:
                 object_list3 = list()
                 for key in response3['Contents']:
@@ -608,32 +582,11 @@ Resources:
                 object_list4 = list(set(object_list3))
                 if len(object_list4) >= 1:
                   if list(set(object_list4)) != ['']:
-                    print("Training Data Already Exists")
+                    print("Success: Training Data Already Exists")
                     code_pipeline.put_job_success_result(jobId=job_id)
                   else:
-                    print("Copying synthetic bucket")
-                    if 'Contents' in response4:
-                      print("Copying From Synthetic Bucket")
-                      for key in response4['Contents']:
-                        s = str(key['Key']);
-                        object_name = s[ s.find("/") + 1 : ]
-                        response = s3.copy_object( Bucket=str(os.environ["SRC_BKT_NAME"]), CopySource={'Bucket': str(os.environ["SYNTHETIC_DATA_NAME"]), 'Key': s}, Key='input/data/training/'+ str(object_name))
-                        code_pipeline.put_job_success_result(jobId=job_id)
-                    else:
-                      print('No Content in Synthetic Data Bucket')
-                      code_pipeline.put_job_failure_result(jobId=job_id)
-              else:
-                print("Copying from synthetic bucket")
-                if 'Contents' in response4:
-                  print("Copying From Synthetic Bucket")
-                  for key in response4['Contents']:
-                    s = str(key['Key']);
-                    object_name = s[ s.find("/") + 1 : ]
-                    response = s3.copy_object( Bucket=str(os.environ["SRC_BKT_NAME"]), CopySource={'Bucket': str(os.environ["SYNTHETIC_DATA_NAME"]), 'Key': s}, Key='input/data/training/'+ str(object_name))
-                    code_pipeline.put_job_success_result(jobId=job_id)
-                else:
-                  print('No Content in Synthetic Data Bucket')
-                  code_pipeline.put_job_failure_result(jobId=job_id)
+                    print("Data Does Not Exist. Please Add Data")
+                    code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'type': 'JobFailed'})
             except Exception as e:
               code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': e, 'type': 'JobFailed'})
 
@@ -644,7 +597,6 @@ Resources:
       Environment:
         Variables:
           'ECR_REPO': !Ref Repository
-          'SYNTHETIC_DATA_NAME': !Ref SyntheticBucketName
           'SRC_BKT_NAME': !Ref TrainingInputBucket
           'META_DATA_STORE': !Ref MetaDataStore
           'IMG': !Sub ${GitHubRepo}
@@ -839,7 +791,7 @@ Outputs:
       SageMaker Training Input S3 bucket
     Value: !Sub https://console.aws.amazon.com/s3/buckets/${TrainingInputBucket}/?region=${AWS::Region}
 
-  PipelineMetaDataStore:
+  MetaDataStore:
     Description: >
-      DynamoDB Table tracking pipeline artifacts
+      DynamoDB Table grouping related artifacts together
     Value: !Sub https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${MetaDataStore};tab=items
