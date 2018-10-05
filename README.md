@@ -13,8 +13,6 @@ The pipeline is executed whenever
 
 **Note**: This pipeline consumes code in the github repository branch that is laid out as a python package with a setup.py file in the root of the repository along with the module folder.
 
-----
-
 
 ### Step 1: Setup AWS Account
 
@@ -32,13 +30,16 @@ In order to use this pipeline its expected that your model algorithm is packaged
 
 To learn more about packaging python code [see here](https://python-packaging.readthedocs.io/en/latest/). Also **please note** that you would need to get a personal access token for the pipeline to link to your source repo in Github.
 
-[Click Here](https://github.com/MustafaWaheed91/tf-gamesbiz) to see an example of a compatible packaged python model that can be consumed by this pipeline.
+[Check this repository](https://github.com/MustafaWaheed91/tf-gamesbiz) to see an example of a compatible packaged python model that can be consumed by this pipeline.
 Feel free to check the repository and the packaged module "gamesbiz" inside. The the training algorithm is in the module *train.py* implemented as a function named "entry_point()".
+
 You can also fork [this example repository](https://github.com/MustafaWaheed91/tf-gamesbiz) to test out this pipeline:
 
 As you can see the root level of your Github repo has a *setup.py* file present there along with the package module directory (as is convention).
 In order to use this CICD pipeline with your packaged python code you need to add an "entry_points" argument in your *setup.py* file in the "setup()" function.
-This allows the pipeline to build an image that directly executes the function you specify as the entry point to your module. You can see this in the *setup.py* file for the [example repo](https://github.com/MustafaWaheed91/tf-gamesbiz) where the function is named "entry_point()" as well.
+
+This additional "entry_points" argument provides all the information the pipeline needs to build a SageMaker compatible docker image.
+You can see this in the *setup.py* file for the [example repo](https://github.com/MustafaWaheed91/tf-gamesbiz) where the function is named "entry_point()" as well.
 Make sure to keep "train" keyword on the LHS of the "=" when specifying the entry point string as seen in the juxtaposition below.
 
 ```
@@ -74,11 +75,10 @@ setup(
 
 ```
 
-This additional *entry_points* argument provides all the information the pipline needs to build a SageMaker compatible docker image.
 
 ----
 
-#### Step 3: Launch Pipeline Stack
+### Step 3: Launch Pipeline Stack
 
 To launch the pipeline open up your terminal and do the following:
 
