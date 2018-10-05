@@ -15,9 +15,8 @@ The pipeline is executed whenever
 
 ----
 
-### Getting Started
 
-#### Step 1: Setup AWS Account
+### Step 1: Setup AWS Account
 
 Make sure you have an AWS account. You should also make sure that you have AWS CLI installed and configured.
 
@@ -25,7 +24,7 @@ Make sure you have an AWS account. You should also make sure that you have AWS C
 
 ----
 
-#### Step 2: Package Model
+### Step 2: Package Model
 
 In order to use this pipeline its expected that your model algorithm is packaged up like a python module and uploaded to a Github repository, as seen below:
 
@@ -139,7 +138,7 @@ There you will find links to the following resources:
 
 ----
 
-#### Step 4: Interact with Pipeline
+### Step 4: Interact with Pipeline
 
 You can trigger the pipeline by:
 
@@ -157,7 +156,7 @@ Click on the link associated with *PipelineUrl* to see the pipeline execution de
 
 ----
 
-#### Step 5: Delete Pipeline Stack
+### Step 5: Delete Pipeline Stack
 
 To tear down the pipeline resources just delete the CF stack from the cloud formation console.
 
