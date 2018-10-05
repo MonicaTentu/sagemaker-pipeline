@@ -77,6 +77,20 @@ This additional *entry_points* argument provides all the information the pipline
 
 #### Step 3: Launch Pipeline Stack
 
+To launch the pipeline open up your terminal and do the following:
+
+```
+git clone https://github.com/MustafaWaheed91/sagemaker-pipeline.git
+
+cd sagemaker-pipeline
+
+chmod +x launch-cicd-pipeline.sh
+
+# Edit the lauch-cicd-pipeline.sh script with your own model repo info
+
+./launch-cicd-pipeline.sh
+
+```
 You **can edit any of the following variables** in *launch-cicd-pipeline.sh* as you see appropriate for your own instance of the pipeline stack for your own Github repository and code.
 
 ```
@@ -104,19 +118,6 @@ Lambdas_Bucket="${Template_Name}-lambdas-`date '+%Y-%m-%d-%H-%M-%S'`"
 Lambdas_Key="SageMakerTrigger/LambdaFunction.zip"
 ....
 
-To launch the pipeline open up your terminal and do the following:
-
-```
-git clone https://github.com/MustafaWaheed91/sagemaker-pipeline.git
-
-cd sagemaker-pipeline
-
-chmod +x launch-cicd-pipeline.sh
-
-# Edit the lauch-cicd-pipeline.sh script with your own model repo info
-
-./launch-cicd-pipeline.sh
-
 ```
 
 You can monitor stack creation on AWS CloudFormation console.
@@ -124,17 +125,19 @@ You can monitor stack creation on AWS CloudFormation console.
 Once the pipeline stack has been successfully provisioned. Check the outputs tab for this stack while on the CloudFormation console.
 There you will find links to the following resources:
 
-* **PipelineUrl**: with an URL link to the CodePipeline execution page (It provides a useful **visual** of the current or last run execution)
-* **TrainingInputBucket**: with an URL link to the S3 input bucket (where you'll find a S3 key or "folder" structure corresponding to the one SageMaker makes available under */opt/ml/* to the container running your code). More information regarding this can be found [here](https://docs.aws.amazon.com/sagemaker/latest/dg/your-algorithms-training-algo.html#your-algorithms-training-algo-running-container)
-* **ModelArtifactBucket**: with an URL link to the S3 bucket where SageMaker uploads the model output artifact corresponding to what you save in the /opt/ml/model/ and opt/ml/output/failure directories. More information can be found [here](https://docs.aws.amazon.com/sagemaker/latest/dg/your-algorithms-training-algo.html#your-algorithms-training-algo-envvariables)
-* **MetaDataStore**: with an URL link to the DynamoDB table tracking the git commit hash, input data S3 object versions, SageMaker training job name and status and times.
+* **PipelineUrl**: with an URL link to the CodePipeline execution page
+* **TrainingInputBucket**: with an URL link to the S3 input bucket
+* **ModelArtifactBucket**: with an URL link to the S3 bucket where SageMaker uploads the model output artifact.
+* **MetaDataStore**: with an URL link to the DynamoDB table tracking the meta data for each execution for your pipeline.
 
 **Note**: During stack creation you will receive an email to the address you specified in CloudFormation template to subscribe to the SNS topic notifying you when your SageMaker training job finishes
 
 #### Step 4: Interact with Pipeline
 
-You can trigger the pipeline by either uploading new data to the *TrainingInputBucket* under the 'input/data/' key prefix, or by
-pushing a commit to the Github repository branch that the pipeline was configured for. In both cased the Source, Build, Validate Inputs and SageMaker Trigger stages in the CodePipeline are re-executed.
+You can trigger the pipeline by:
+
+1- Uploading new data to the *TrainingInputBucket* under the 'input/data/' key prefix, or by
+2- Pushing a commit to the Github repository branch that the pipeline was configured for.
 
 Once the SageMaker Training Job finishes and model artifact is pushed to the *ModelArtifactBucket* in S3.
 
@@ -145,7 +148,6 @@ Click on the link associated with *PipelineUrl* to see the pipeline execution de
 
 ![Pipeline Execution](./images/pipeline-exec.png)
 
-**Note**:
 
 ### Step 6: Tear Down Stack when Needed
 
