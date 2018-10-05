@@ -122,8 +122,6 @@ Lambdas_Key="SageMakerTrigger/LambdaFunction.zip"
 
 ```
 
-```
-
 You can monitor stack creation on AWS CloudFormation console.
 
 Once the pipeline stack has been successfully provisioned. Check the outputs tab for this stack while on the CloudFormation console.
