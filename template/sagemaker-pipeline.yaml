@@ -3,6 +3,14 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: >
   CICD Pipeline for SageMaker Training
 Parameters:
+  LambdasBucket:
+    Description: The S3 bucket your pipeline lambdas will be strored in
+    Type: String
+
+  LambdasKey:
+    Description: Key to the lambda function resouce that triggers sagemaker
+    Type: String
+
   Email:
     Description: The Email Address that notifications are sent to
     Type: String
@@ -27,13 +35,6 @@ Parameters:
     Description: >
       Token for the user specified above. (https://github.com/settings/tokens)
 
-#  SyntheticBucketName:
-#    Type: String
-#    Description: >
-#      This is the bucket name for the bucket holding the synthetic data for models and is indexed
-#      by gitrepo name of each model e.g. <SyntheticBucketName>/<GitRepo>/<SomePartialKey>/*.csv
-#    Default: synthetic-data-bkt
-
   BuildTimeoutMins:
     Type: Number
     Description: Time out Limit in Minutes for CodeBuild
@@ -44,7 +45,6 @@ Parameters:
     Type: String
     Description: Python Version for the Linux Container in CodeBuild
     AllowedValues:
-      - aws/codebuild/python:3.6.5-1.3.2
       - aws/codebuild/python:3.6.5-1.3.2
 
   InstanceCount:
@@ -96,9 +96,6 @@ Metadata:
       InstanceType:
         default: "The Type of Instance for SageMaker Training Job"
 
-#      SyntheticBucketName:
-#        default: "The name for the S3 input bucket which holds synthetic data"
-
     ParameterGroups:
       - Label:
           default: Notification Configuration
@@ -112,11 +109,6 @@ Metadata:
           - GitHubBranch
           - GitHubUser
           - GitHubToken
-
-#      - Label:
-#          default: Synthetic Data S3 Bucket Configuration
-#        Parameters:
-#          - SyntheticBucketName
 
       - Label:
           default: AWS CodeBuild Configuration
@@ -160,8 +152,8 @@ Resources:
 
   ModelArtifactBucket:
     Type: AWS::S3::Bucket
-    DependsOn: LambdaInvokeOutputPermission
     DeletionPolicy: Retain
+    DependsOn: LambdaInvokeOutputPermission
     Properties:
       BucketName: !Sub ${AWS::StackName}-model-output
       VersioningConfiguration:
@@ -182,8 +174,8 @@ Resources:
 
   TrainingInputBucket:
     Type: AWS::S3::Bucket
-    DependsOn: LambdaInvokePermission
     DeletionPolicy: Retain
+    DependsOn: LambdaInvokePermission
     Properties:
       BucketName: !Sub ${AWS::StackName}-input-data
       VersioningConfiguration:
@@ -360,6 +352,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt LambdaS3FolderFunction.Arn
       TrainingInputS3: !Ref TrainingInputBucket
+      LambdasBucketS3: !Ref LambdasBucket
 
   LambdaS3FolderFunction:
     Type: AWS::Lambda::Function
@@ -382,6 +375,7 @@ Resources:
           def lambda_handler(event, context):
 
             input_bucket_name = str(event['ResourceProperties']['TrainingInputS3'])
+            lambdas_bucket_name = str(event['ResourceProperties']['LambdasBucketS3'])
 
             if(event['RequestType'] == "Create"):
 
@@ -398,6 +392,7 @@ Resources:
               responseData = {}
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
             else:
+              print("got till here")
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData=None)
 
   LambdaBuildTrigger:
@@ -427,31 +422,26 @@ Resources:
             logger.info('got event {}'.format(event))
 
             pipelineName = str(os.environ["PIPELINE"])
-            response = codepipeline.list_pipelines()
 
-            pipeline_list = []
+            response1 = codepipeline.list_pipeline_executions(pipelineName=str(pipelineName))
 
-            for pipe in response['pipelines']:
-              pipeline_list.append(pipe['name'])
-
-            if pipelineName in pipeline_list:
-              response1 = codepipeline.list_pipeline_executions(pipelineName=str(pipelineName))
-
-              if not response1['pipelineExecutionSummaries'][0]:
-                print('Kick off a new pipeline execution')
-                codepipeline.start_pipeline_execution(pipelineName=str(pipelineName))
-              else:
-                latest_execution = response1['pipelineExecutionSummaries'][0]
-                execution_status = str(latest_execution['status'])
-
-                if execution_status == 'InProgress':
-                  print('Execution In Progress Do Nothing')
-
-                if execution_status == 'Succeeded':
-                  print('Restarting execution for Pipeline')
-                  codepipeline.start_pipeline_execution(name=str(pipelineName))
+            if not response1['pipelineExecutionSummaries'][0]:
+              print('Kick off a new pipeline execution')
+              codepipeline.start_pipeline_execution(pipelineName=str(pipelineName))
             else:
-              print("No Pipeline Execution Available")
+              latest_execution = response1['pipelineExecutionSummaries'][0]
+              execution_status = str(latest_execution['status'])
+
+              if execution_status == 'InProgress':
+                print('Execution In Progress Do Nothing')
+
+              if execution_status == 'Succeeded':
+                print('Restarting execution for Pipeline')
+                codepipeline.start_pipeline_execution(name=str(pipelineName))
+
+              if execution_status == 'Failed':
+                print('Restarting Failed execution for Pipeline')
+                codepipeline.start_pipeline_execution(name=str(pipelineName))
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -473,14 +463,14 @@ Resources:
               commands:
                 - export IMG="${REPO_NAME}"
                 - export PAYLOAD={\"COMMIT_ID\":\"${CODEBUILD_RESOLVED_SOURCE_VERSION}\",\"IMG\":\"${REPO_NAME}\"}
-                - echo "${PAYLOAD}"
                 - echo "${PAYLOAD}" > outfile.txt
-                - export entry_point=$(ps -ef | awk '/entry_point={/{flag=1;next}/}/{flag=0}flag { print $1 }' setup.py )
-                - export module_name=$(echo ${entry_point} | cut -d ':' -f1 | sed -e 's/^"//' -e 's/"$//')
-                - export function_name=$(echo ${entry_point} | cut -d ':' -f2 | sed -e 's/^"//' -e 's/"$//')
                 - python setup.py egg_info
                 - export pkg_name=$(ps -ef | awk '{ if ($1 ~ /Name:/) print $2}' *.egg-info/PKG-INFO)
                 - export pkg_version=$(ps -ef | awk '{ if ($1 ~ /^Version:/) print $2}' *.egg-info/PKG-INFO)
+                - module_name=$(ps -ef | awk '{ if ($1 ~ /train/) print $3 }' *.egg-info/entry_points.txt | cut -d ':' -f1 | sed -e 's/^"//' -e 's/"$//')
+                - function_name=$(ps -ef | awk '{ if ($1 ~ /train/) print $3 }' *.egg-info/entry_points.txt | cut -d ':' -f2 | sed -e 's/^"//' -e 's/"$//')
+                - export module_name=$(echo $module_name)
+                - export function_name=$(echo $function_name)
                 - export dependencies=""
                 - |
                   while read -r line
@@ -516,6 +506,8 @@ Resources:
                 - echo "RUN pip install /opt/$pkg_name-$pkg_version.tar.gz" >> Dockerfile
                 - echo "from $module_name import $function_name" >> run.py
                 - echo "$function_name()" >> run.py
+                - cat run.py
+                - cat Dockerfile
                 - cd ..
             build:
               commands:
@@ -586,7 +578,7 @@ Resources:
                     code_pipeline.put_job_success_result(jobId=job_id)
                   else:
                     print("Data Does Not Exist. Please Add Data")
-                    code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'type': 'JobFailed'})
+                    code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': 'Data Does Not Exist. Please Add Data', 'type': 'JobFailed'})
             except Exception as e:
               code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': e, 'type': 'JobFailed'})
 
@@ -606,49 +598,15 @@ Resources:
           'INSTANCE_CNT': !Ref InstanceCount
           'EBS_VOL_GB': !Ref VolInGB
           'RUN_TIME_SEC': !Ref MaxRuntimeInSeconds
-          'SRC_BKT_URI': !Sub s3://${TrainingInputBucket}/input/data/training/
+          'SRC_BKT_URI': !Sub s3://${TrainingInputBucket}/input/data/
           'DEST_BKT_URI': !Sub s3://${ModelArtifactBucket}/
-      Handler: index.main
+      Handler: sagemaker-trigger.main
       Runtime: python3.6
       Timeout: '300'
       Role: !GetAtt 'LambdaServiceRole.Arn'
       Code:
-        ZipFile: |
-          import os, json, datetime, boto3, botocore, shutil, zipfile, tempfile, traceback; from boto3.session import Session; boto3.set_stream_logger(level=1); ArtifactFileName = "outfile.txt"; code_pipeline = boto3.client('codepipeline'); sagemaker = boto3.client('sagemaker'); dynamodb = boto3.client('dynamodb');
-
-          def get_artifact(s3, bucketName, objectKey):
-            with tempfile.NamedTemporaryFile() as tmp_file:
-              s3.download_file(bucketName, objectKey, tmp_file.name)
-              with zipfile.ZipFile(tmp_file.name, 'r') as zip:
-                return zip.read(ArtifactFileName)
-
-          def main(event, context):
-            try:
-              job_id = event['CodePipeline.job']['id']; job_data = event['CodePipeline.job']['data']; input_artifact = job_data['inputArtifacts'][0]; config = job_data['actionConfiguration']['configuration']; credentials = job_data['artifactCredentials']; from_bucket = input_artifact['location']['s3Location']['bucketName']; from_bucket = input_artifact['location']['s3Location']['bucketName']; from_key = input_artifact['location']['s3Location']['objectKey']; from_revision = input_artifact['revision']; key_id = credentials['accessKeyId']; key_secret = credentials['secretAccessKey']; session_token = credentials['sessionToken']; session = Session(aws_access_key_id=key_id, aws_secret_access_key=key_secret, aws_session_token=session_token); s3 = session.client('s3', config=botocore.client.Config(signature_version='s3v4') ); docs = get_artifact(s3, from_bucket, from_key)
-              if (docs):
-                docs_dict = json.loads( docs.decode("utf-8") ); git_hash = docs_dict['COMMIT_ID']
-
-              s3 = boto3.client('s3'); response5 = s3.list_objects( Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/config/', Prefix='input/config/' ); hyper_param_dict={"foo":"bar"}
-              if 'Contents' in response5:
-                object_list5 = list()
-                for key in response5['Contents']:
-                  object_list5.append(key['Key'])
-                if len(object_list5) >= 1:
-                  print("Hyperparameters Already Exists"); result = s3.get_object(Bucket=str(os.environ["SRC_BKT_NAME"]), Key=object_list5[0]); text = result["Body"].read().decode(); hyper_param_dict = json.loads(text)
-
-              s3_key_version_dict = dict(); versions = s3.list_object_versions(Bucket = str(os.environ["SRC_BKT_NAME"]), Prefix = 'input/'); x = versions.get('Versions')
-              for key in x:
-                Key = key['Key']; VersionId = key['VersionId']; Size = key['Size']; IsLatest = key['IsLatest']; LastModified = key['LastModified']
-                if Size != 0:
-                  if IsLatest == True:
-                    key_name = str(Key); version_id = { 'S' : str(VersionId) }; s3_key_version_dict.update({key_name:version_id});
-
-              training_job_name = str(os.environ["IMG"]) + '-' + str(datetime.datetime.today()).replace(' ','-').replace(':', '-').rsplit('.')[0]; dynamodb.put_item(TableName=str(os.environ["META_DATA_STORE"]), Item={ 'training_job_name':{ 'S' : training_job_name}, 'git_hash':{'S' : str(git_hash)}, 's3_input': { 'M': s3_key_version_dict } })
-              sagemaker.create_training_job( TrainingJobName=training_job_name, HyperParameters=hyper_param_dict, AlgorithmSpecification={ 'TrainingImage': str(os.environ["FULL_NAME"]), 'TrainingInputMode': 'File'}, RoleArn=str(os.environ["SAGE_ROLE_ARN"]), InputDataConfig=[{ 'ChannelName': 'training', 'DataSource': { 'S3DataSource': { 'S3DataType': 'S3Prefix', 'S3Uri': str(os.environ["SRC_BKT_URI"]) } } }], ResourceConfig={ 'InstanceType': str(os.environ["INSTANCE_TYPE"]), 'InstanceCount': int(os.environ["INSTANCE_CNT"]), 'VolumeSizeInGB': int(os.environ["EBS_VOL_GB"])}, OutputDataConfig={'S3OutputPath': str(os.environ["DEST_BKT_URI"]) }, StoppingCondition={ 'MaxRuntimeInSeconds': int(os.environ["RUN_TIME_SEC"]) })
-
-              code_pipeline.put_job_success_result(jobId=job_id)
-            except Exception as e:
-              code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': e, 'type': 'JobFailed'})
+        S3Bucket: !Ref LambdasBucket
+        S3Key: !Ref LambdasKey
 
   LambdaOutputTrigger:
     Type: AWS::Lambda::Function
@@ -773,7 +731,8 @@ Resources:
                 FunctionName: !Ref 'LambdaSageMakerTrigger'
               InputArtifacts:
                 - Name: bld
-              OutputArtifacts: []
+              OutputArtifacts:
+                - Name: trigger
               RunOrder: '1'
 
 Outputs:

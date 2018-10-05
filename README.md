@@ -14,200 +14,143 @@ The pipeline is executed whenever
 **Note**: This pipeline consumes code in the github repository branch that is laid out as a python package with a setup.py file in the root of the repository along with the module folder.
 ----
 
-### Launch Stack
+### Getting Started
 
-You can either run the following bash script *./launch-cicd-pipeline.sh* where the environment variables are defined as shown below and then use aws cli command to create the stack.
+#### Step 1: Setup AWS Account
+
+Make sure you have an AWS account. You should also make sure that you have AWS CLI installed and configured.
+
+**Note**: You may incur a charge for use of underlying resources
+
+#### Step 2: Package Model
+
+In order to use this pipeline its expected that your model algorithm is packaged up like a python module and uploaded to a Github repository, as seen below:
+
+![Packaged Model](./images/github-repo.png)
+
+To learn more about packaging python code [see here].(https://python-packaging.readthedocs.io/en/latest/). Also **please note** that you would need to get a personal access token for the pipeline to link to your source repo in Github.
+
+[Click Here](https://github.com/MustafaWaheed91/tf-gamesbiz) to see an example of a compatible packaged python model that can be consumed by this pipeline.
+Feel free to check the repository and the packaged module "gamesbiz" inside. The the training algorithm is in the module *train.py* implemented as a function named "entry_point()".
+You can also fork [this example repository](https://github.com/MustafaWaheed91/tf-gamesbiz) to test out this pipeline:
+
+As you can see the root level of your Github repo has a *setup.py* file present there along with the package module directory (as is convention).
+In order to use this CICD pipeline with your packaged python code you need to add an "entry_points" argument in your *setup.py* file in the "setup()" function.
+This allows the pipeline to build an image that directly executes the function you specify as the entry point to your module. You can see this in the *setup.py* file for the [example repo](https://github.com/MustafaWaheed91/tf-gamesbiz) where the function is named "entry_point()" as well.
+Make sure to keep "train" keyword on the LHS of the "=" when specifying the entry point string as seen in the juxtaposition below.
 
 ```
-#!/bin/bash
-Email=<Enter your Email Address>
-GitHub_User=<Enter Github Organization Name or Github Username>
-GitHub_Repo=<Enter Name (Only) of Github Repository>
-GitHub_Branch=<Enter branch name for source for pipeline stage>
-GitHub_Token=<Enter Personal Access Token from Github>
+setup(
+
+    ....
+
+    entry_points={
+       "gamesbiz.training": [
+           "train=gamesbiz.train:entry_point",
+       ]
+    }
+
+    ....
+)
+
+```
+
+```
+setup(
+
+    ....
+
+    entry_points={
+        "<ENTER ANY TEXT>" : [
+            "train = <ENTER MODULE PATH TO FUNCTION TO BE INVOKED>:<ENTER NAME OF FUNCTION>"
+        ]
+    }
+
+    ....
+
+)
+
+```
+
+This additional *entry_points* argument provides all the information the pipline needs to build a SageMaker compatible docker image.
+
+
+#### Step 3: Launch Pipeline Stack
+
+You **can edit any of the following variables** in *launch-cicd-pipeline.sh* as you see appropriate for your own instance of the pipeline stack for your own Github repository and code.
+
+```
+AWS_DEFAULT_REGION="<ENTER AWS REGION>"
+Email="<ENTER EMAIL ADDRESS FOR PIPELINE NOTIFICATION>"
+
+# Parameters to Configure Specific Github Repo
+GitHub_User="<ENTER YOUR GITHUB USER NAME>"
+GitHub_Repo="<ENTER NAME (ONLY) OF GITHUB REPOSITORY>"
+GitHub_Branch="<ENTER NAME OF GIT BRANCH THAT WILL TRIGGER PIPELINE>"
+GitHub_Token="<ENTER GITHUB PERSONAL ACCESS TOKEN>"
+
+# CodeBuild Project Parameters
 Python_Build_Version="aws/codebuild/python:3.6.5-1.3.2"
+Build_Timeout_Mins=30
 
+# SageMaker Training Job Parameters
+Instance_Count=1
+Instance_Type="ml.m4.4xlarge"
+Max_Runtime_In_Seconds=86400
+Vol_In_GB=30
 
-Template_Name=${GitHub_Repo}-cicd-pipeline
-AWS_DEFAULT_REGION=us-east-1
+Template_Name="${GitHub_Repo}-cicd-pipeline"
+Lambdas_Bucket="${Template_Name}-lambdas-`date '+%Y-%m-%d-%H-%M-%S'`"
+Lambdas_Key="SageMakerTrigger/LambdaFunction.zip"
+....
 
-aws cloudformation create-stack \
-  --region ${AWS_DEFAULT_REGION} \
-  --stack-name $Template_Name \
-  --template-body file://template/sagemaker-pipeline.yaml \
-  --parameters \
-    ParameterKey=Email,ParameterValue=$Email \
-    ParameterKey=GitHubUser,ParameterValue=$GitHub_User \
-    ParameterKey=GitHubRepo,ParameterValue=$GitHub_Repo \
-  	ParameterKey=GitHubBranch,ParameterValue=$GitHub_Branch \
-  	ParameterKey=GitHubToken,ParameterValue=$GitHub_Token \
-    ParameterKey=PythonBuildVersion,ParameterValue=$Python_Build_Version \
-  --capabilities CAPABILITY_NAMED_IAM
+To launch the pipeline open up your terminal and do the following:
+
+```
+git clone https://github.com/MustafaWaheed91/sagemaker-pipeline.git
+
+cd sagemaker-pipeline
+
+chmod +x launch-cicd-pipeline.sh
+
+# Edit the lauch-cicd-pipeline.sh script with your own model repo info
+
+./launch-cicd-pipeline.sh
 
 ```
 
+You can monitor stack creation on AWS CloudFormation console.
 
+Once the pipeline stack has been successfully provisioned. Check the outputs tab for this stack while on the CloudFormation console.
+There you will find links to the following resources:
 
-
-**Note**: During stack creation you will receive an email to the address you specified in CloudFormation template to subscribe to the SNS topic notifying you when your SageMaker training job finishes
-----
-### Pipeline Overview
-
-After the CloudFormation template has been created you can look in the outputs section where you will find:
 * **PipelineUrl**: with an URL link to the CodePipeline execution page (It provides a useful **visual** of the current or last run execution)
 * **TrainingInputBucket**: with an URL link to the S3 input bucket (where you'll find a S3 key or "folder" structure corresponding to the one SageMaker makes available under */opt/ml/* to the container running your code). More information regarding this can be found [here](https://docs.aws.amazon.com/sagemaker/latest/dg/your-algorithms-training-algo.html#your-algorithms-training-algo-running-container)
 * **ModelArtifactBucket**: with an URL link to the S3 bucket where SageMaker uploads the model output artifact corresponding to what you save in the /opt/ml/model/ and opt/ml/output/failure directories. More information can be found [here](https://docs.aws.amazon.com/sagemaker/latest/dg/your-algorithms-training-algo.html#your-algorithms-training-algo-envvariables)
-* **PipelineMetaDataStore**: with an URL link to the DynamoDB table tracking the git commit hash, input data S3 object versions, SageMaker training job name and status and times.
+* **MetaDataStore**: with an URL link to the DynamoDB table tracking the git commit hash, input data S3 object versions, SageMaker training job name and status and times.
 
+**Note**: During stack creation you will receive an email to the address you specified in CloudFormation template to subscribe to the SNS topic notifying you when your SageMaker training job finishes
 
-In the TrainingInputBucket you will find S3 keys (or folders) already present in the bucket. This folder structure **corresponds to the directory prefixes that SageMaker makes available to your container running your code** under */opt/ml/*.
+#### Step 4: Interact with Pipeline
 
-For more information on how SageMaker makes input data available to your training container check the relevant [documentation](https://docs.aws.amazon.com/sagemaker/latest/dg/your-algorithms-training-algo.html#your-algorithms-training-algo-running-container)
+You can trigger the pipeline by either uploading new data to the *TrainingInputBucket* under the 'input/data/' key prefix, or by
+pushing a commit to the Github repository branch that the pipeline was configured for. In both cased the Source, Build, Validate Inputs and SageMaker Trigger stages in the CodePipeline are re-executed.
 
-This pipeline extends the same idea can upload training, testing and/or validation data objects (like csv or parquet etc. files) under the corresponding S3 key (folder) *input/data/<channel>* already present.
-You can also upload a *hyperparameters.json* file under the S3 key (folder) *input/config/* and it much like the data can be accessed by your code from */opt/ml/input/config*
+Once the SageMaker Training Job finishes and model artifact is pushed to the *ModelArtifactBucket* in S3.
 
-As already mentioned anytime the input data chnages or anytime code changes are pushed to a github repository branch holding
+You can track the git hash, input data object version(s) along with SageMaker Training Job status/meta data in DynamoDB table
+which is the *MetaDataStore* in the stack output.
 
+Click on the link associated with *PipelineUrl* to see the pipeline execution details as seen below:
 
+![Pipeline Execution](./images/pipeline-exec.png)
 
-**Note**: The training job executes in FILE mode.
-----
-
-
-### Step 1: Set Up AWS Account
-
-Create an AWS account if you have not done so already and also make sure you have AWS CLI configured to create the stack from the terminal.
-You should also have the relevant permissions to be able to create IAM roles.
-
-**Note**: You may incur cost ($) utilizing the resources that constitute this pipeline.
-
-
-### Step 2: Prepare the Training Code as Packaged Python Module
-
-The source code for your training algorithm should be in the form of a python package with setup.py file in the root level of a Github repository.
-Information about this Github repository, username, branch and personal access token would be provided as parameters when creating the cloudformation stack.
-
-An example of such a simple packaged model can be found here: [tf_gamesbiz model](https://github.com/MustafaWaheed91/tf-gamesbiz).
-
-As you will note in this example repo the actual module which initiates the model training is located in the root level of the repository named "gamesbiz".
-within this gamesbiz module I have a sub module *train.py* where I have a function entry_point() that kicks off the model training. This information can be
-provided in the setup.py file (which is also located in the root level of the source repository).
-
-Make sure the *setup.py* file for your own packaged training algorithm should be arranged the same as in the example.
-See the following generic example of *setup.py*
-
-
-```
-from setuptools import setup, find_packages
-
-setup(
-    name='<your python package name>',
-    version='0.0.1rc0',
-
-    # Package data
-    packages=find_packages(),
-    include_package_data=True,
-
-    # Insert dependencies list here
-    install_requires=[
-        'numpy',
-        'scipy',
-        'pandas',
-        'scikit-learn',
-        'tensorflow',
-        '<external_python_package>',
-        '<external_python_package>',
-    ],
-
-    entry_point={
-        "gamesbiz.train":"entry_point"
-    }
-)
-
-```
-
-Make sure that for your own modules *setup.py* you enter the entry_point argument like shown below:
-
-```
-setup(
-   ...
-
-     entry_point={
-        "<module resource path>":"<Name of the Function that kicks of training>"
-    }
-
-   ...
-)
-```
-
-Here the *<module resource path>* is the path to the module or sub-module (depending on the contents of the __init__.py file in your modules top level) which contains the function that will strat training your model.
-And *<Name of the Function that kicks of training>* is just the string with the name of the function without "( )" for the example project [tf_gamesbiz model](https://github.com/MustafaWaheed91/tf-gamesbiz)
-the function it self was also name entry_point (under gamesbiz.train).
-
-This additional *entry_point* argument provides all the information the pipline needs to build a SageMaker compatible docker image. You'll see this in the
-steps that follow. Once this is done whenever you push a commit to the repo with your
-
-
-### Step 3: Create Synthetic Data Bucket
-
-Make sure you have a "Synthetic Data Bucket" that you provided as parameter in CF template. Some sample input data should be present under the S3 key equivalent to the Github repository name i.e under '<synthetic-data-bucket>"/<Github-Repository-Name>/"
-This is not exactly a strict requirement but this type of sample data is usefull in the context of the pipeline conducting an overall integration test for the fist execution on setup.
-
-Regardless of the first execution, whenever you upload new data to the *TrainingInputBucket* the pipeline should re-execute given that its not already in progress.
-
-**Note**: The Github repository name is not the url
-
-
-### Step 4: Create Pipeline Stack
-
-You can either run the following bash script *./launch-cicd-pipeline.sh* . In the bash script define the environment variables as instructed below and then use aws cli command to create the stack.
-*you can view the progress of the template in the console*
-
-```
-#!/bin/bash
-Email=<Enter your Email Address>
-GitHub_User=<Enter Github Organization Name or Github Username>
-GitHub_Repo=<Enter Name (Only) of Github Repository>
-GitHub_Branch=<Enter branch name for source for pipeline stage>
-GitHub_Token=<Enter Personal Access Token from Github>
-Python_Build_Version="aws/codebuild/python:3.6.5-1.3.2"
-Template_Name=${GitHub_Repo}-cicd-pipeline
-AWS_DEFAULT_REGION=us-east-1
-
-aws cloudformation create-stack \
-  --region ${AWS_DEFAULT_REGION} \
-  --stack-name $Template_Name \
-  --template-body file://template/sagemaker-pipeline.yaml \
-  --parameters \
-    ParameterKey=Email,ParameterValue=$Email \
-    ParameterKey=GitHubUser,ParameterValue=$GitHub_User \
-    ParameterKey=GitHubRepo,ParameterValue=$GitHub_Repo \
-  	ParameterKey=GitHubBranch,ParameterValue=$GitHub_Branch \
-  	ParameterKey=GitHubToken,ParameterValue=$GitHub_Token \
-    ParameterKey=PythonBuildVersion,ParameterValue=$Python_Build_Version \
-  --capabilities CAPABILITY_NAMED_IAM
-
-```
-
-### Step 5: Trigger and Track Execution
-
-Once the Stack has been successfully deployed you can trigger the pipeline by either uploading new data to the TrainingInputBucket under the input/data/ key prefix, or by
-pushing a commit to the Github repository branch specified when creating the CF stack.
-Either way the Source, Build, Validate Inputs and SageMaker Trigger stages in the CodePipeline are re-executed.
-
-**You can see the pipeline execution in the console via the link provided in the CloudFormation stack "output"**
-
-Once the SageMaker Training Job finishes and model artifact is pushed to the S3 bucket you will recieve an email notification (assuming you suscribed to the PipelineEndSNSTopic during stack creation).
-
-**You can track the git hash, input data object version(s), along with SageMaker Training Job status/meta data in DynamoDB table**
-this is the MetaDataStore table also referenced in CloudFormation stack "output".
-
+**Note**:
 
 ### Step 6: Tear Down Stack when Needed
 
 To tear down the resources (other than ECR repo and Input and Output S3 buckets) in the stack just delete the CF stack from the cloud formation console.
-
+**Note**: The S3 buckets and the ECR repository are not deleted when deleting this pipelines CloudFormation stack.
 
 ### Assumptions
 
@@ -217,13 +160,12 @@ To tear down the resources (other than ECR repo and Input and Output S3 buckets)
 
 ----
 
-  
 ## Built With
 
 * [AWS CodePipeline](https://aws.amazon.com/codepipeline/) - Continous Integration Service
 * [AWS CodeBuild](https://aws.amazon.com/codebuild/) - Fully Managed Build and Test Service
 * [Amazon SageMaker](https://aws.amazon.com/sagemaker/) - Machine Learning Framework that Scales
-* [Amazon S3](https://aws.amazon.com/s3/) - Simple Storage Service 
+* [Amazon S3](https://aws.amazon.com/s3/) - Simple Storage Service
 * [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) - Non Relational Database
 * [AWS Lambda](https://aws.amazon.com/lambda/) - Serverless Compute Service
 
