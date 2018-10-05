@@ -23,6 +23,8 @@ Make sure you have an AWS account. You should also make sure that you have AWS C
 
 **Note**: You may incur a charge for use of underlying resources
 
+----
+
 #### Step 2: Package Model
 
 In order to use this pipeline its expected that your model algorithm is packaged up like a python module and uploaded to a Github repository, as seen below:
@@ -75,6 +77,7 @@ setup(
 
 This additional *entry_points* argument provides all the information the pipline needs to build a SageMaker compatible docker image.
 
+----
 
 #### Step 3: Launch Pipeline Stack
 
@@ -134,12 +137,14 @@ There you will find links to the following resources:
 
 **Note**: During stack creation you will receive an email to the address you specified in CloudFormation template to subscribe to the SNS topic notifying you when your SageMaker training job finishes
 
+----
+
 #### Step 4: Interact with Pipeline
 
 You can trigger the pipeline by:
 
-1- Uploading new data to the *TrainingInputBucket* under the 'input/data/' key prefix, or by
-2- Pushing a commit to the Github repository branch that the pipeline was configured for.
+* Uploading new data to the *TrainingInputBucket* under the 'input/data/' key prefix, or by
+* Pushing a commit to the Github repository branch that the pipeline was configured for
 
 Once the SageMaker Training Job finishes and model artifact is pushed to the *ModelArtifactBucket* in S3.
 
@@ -150,10 +155,11 @@ Click on the link associated with *PipelineUrl* to see the pipeline execution de
 
 ![Pipeline Execution](./images/pipeline-exec.png)
 
+----
 
-### Step 6: Tear Down Stack when Needed
+#### Step 5: Delete Pipeline Stack
 
-To tear down the resources (other than ECR repo and Input and Output S3 buckets) in the stack just delete the CF stack from the cloud formation console.
+To tear down the pipeline resources just delete the CF stack from the cloud formation console.
 
 **Note**: The S3 buckets and the ECR repository are not deleted when deleting this pipelines CloudFormation stack.
 
