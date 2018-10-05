@@ -154,7 +154,10 @@ Click on the link associated with *PipelineUrl* to see the pipeline execution de
 ### Step 6: Tear Down Stack when Needed
 
 To tear down the resources (other than ECR repo and Input and Output S3 buckets) in the stack just delete the CF stack from the cloud formation console.
+
 **Note**: The S3 buckets and the ECR repository are not deleted when deleting this pipelines CloudFormation stack.
+
+----
 
 ### Assumptions
 
@@ -162,7 +165,6 @@ To tear down the resources (other than ECR repo and Input and Output S3 buckets)
 2. Familiarity with Machine Learning is also assumed
 3. Know how to generate a Personal Access Token in Github
 
-----
 
 ## Built With
 
