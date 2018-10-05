@@ -12,6 +12,7 @@ The pipeline is executed whenever
 * A data or config objects are created or updated in the training input bucket under the S3 key */input/data/training*
 
 **Note**: This pipeline consumes code in the github repository branch that is laid out as a python package with a setup.py file in the root of the repository along with the module folder.
+
 ----
 
 ### Getting Started
@@ -28,7 +29,7 @@ In order to use this pipeline its expected that your model algorithm is packaged
 
 ![Packaged Model](./images/github-repo.png)
 
-To learn more about packaging python code [see here].(https://python-packaging.readthedocs.io/en/latest/). Also **please note** that you would need to get a personal access token for the pipeline to link to your source repo in Github.
+To learn more about packaging python code [see here](https://python-packaging.readthedocs.io/en/latest/). Also **please note** that you would need to get a personal access token for the pipeline to link to your source repo in Github.
 
 [Click Here](https://github.com/MustafaWaheed91/tf-gamesbiz) to see an example of a compatible packaged python model that can be consumed by this pipeline.
 Feel free to check the repository and the packaged module "gamesbiz" inside. The the training algorithm is in the module *train.py* implemented as a function named "entry_point()".
@@ -116,7 +117,10 @@ Vol_In_GB=30
 Template_Name="${GitHub_Repo}-cicd-pipeline"
 Lambdas_Bucket="${Template_Name}-lambdas-`date '+%Y-%m-%d-%H-%M-%S'`"
 Lambdas_Key="SageMakerTrigger/LambdaFunction.zip"
-....
+
+...
+
+```
 
 ```
 
