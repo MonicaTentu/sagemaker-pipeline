@@ -40,6 +40,7 @@ In order to use this CICD pipeline with your packaged python code you need to ad
 
 This additional "entry_points" argument provides all the information the pipeline needs to build a SageMaker compatible docker image.
 You can see this in the *setup.py* file for the [example repo](https://github.com/MustafaWaheed91/tf-gamesbiz) where the function is named "entry_point()" as well.
+
 Make sure to keep "train" keyword on the LHS of the "=" when specifying the entry point string as seen in the juxtaposition below.
 
 ```
