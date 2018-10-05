@@ -12,6 +12,7 @@ The pipeline is executed whenever
 * A data or config objects are created or updated in the training input bucket under the S3 key */input/data/training*
 
 **Note**: This pipeline consumes code in the github repository branch that is laid out as a python package with a setup.py file in the root of the repository along with the module folder.
+
 ----
 
 ### Getting Started
