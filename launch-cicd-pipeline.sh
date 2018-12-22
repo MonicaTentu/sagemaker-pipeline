@@ -1,12 +1,12 @@
 #!/bin/bash
 AWS_DEFAULT_REGION="us-east-1"
-Email="<ENTER-EMAIL-HERE>"
+Email=""
 
 # Parameters to Configure Specific Github Repo
 GitHub_User="MustafaWaheed91"
 GitHub_Repo="tf-gamesbiz"
 GitHub_Branch="master"
-GitHub_Token="<ENTER-GITHUB-TOKEN-HERE>"
+GitHub_Token=""
 
 # CodeBuild Project Parameters
 Python_Build_Version="aws/codebuild/python:3.6.5-1.3.2"
