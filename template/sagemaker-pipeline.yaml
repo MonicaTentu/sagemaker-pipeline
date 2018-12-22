@@ -1,7 +1,7 @@
 ---
 AWSTemplateFormatVersion: 2010-09-09
 Description: >
-  CICD Pipeline for SageMaker Training
+  CICD Pipeline for Deploying ML Microservices using Amazon SageMaker
 Parameters:
   LambdasBucket:
     Description: The S3 bucket your pipeline lambdas will be strored in
@@ -125,6 +125,33 @@ Metadata:
           - MaxRuntimeInSeconds
 
 Resources:
+  TrainingInputBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    DependsOn: LambdaInvokePermission
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-input-data
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Function: !GetAtt LambdaPipelineTrigger.Arn
+            Event: "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: Prefix
+                    Value: input/
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'LambdaPipelineTrigger.Arn'
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub arn:aws:s3:::${AWS::StackName}-input-data
+
   MetaDataStore:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -138,11 +165,15 @@ Resources:
         ReadCapacityUnits: "10"
         WriteCapacityUnits: "5"
 
-  Repository:
+  TrainingImageRepository:
     Type: AWS::ECR::Repository
     DeletionPolicy: Retain
 
-  ArtifactStoreBucket:
+  InferenceImageRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+
+  CodepipelineArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     Properties:
@@ -153,51 +184,10 @@ Resources:
   ModelArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
-    DependsOn: LambdaInvokeOutputPermission
     Properties:
       BucketName: !Sub ${AWS::StackName}-model-output
       VersioningConfiguration:
         Status: Enabled
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Function: !GetAtt LambdaOutputTrigger.Arn
-            Event: "s3:ObjectCreated:*"
-
-  LambdaInvokeOutputPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !GetAtt LambdaOutputTrigger.Arn
-      Action: 'lambda:InvokeFunction'
-      Principal: s3.amazonaws.com
-      SourceAccount: !Ref AWS::AccountId
-      SourceArn: !Sub arn:aws:s3:::${AWS::StackName}-model-output
-
-  TrainingInputBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    DependsOn: LambdaInvokePermission
-    Properties:
-      BucketName: !Sub ${AWS::StackName}-input-data
-      VersioningConfiguration:
-        Status: Enabled
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Function: !GetAtt LambdaBuildTrigger.Arn
-            Event: "s3:ObjectCreated:*"
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: Prefix
-                    Value: input/data/
-
-  LambdaInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !GetAtt 'LambdaBuildTrigger.Arn'
-      Action: 'lambda:InvokeFunction'
-      Principal: s3.amazonaws.com
-      SourceAccount: !Ref AWS::AccountId
-      SourceArn: !Sub arn:aws:s3:::${AWS::StackName}-input-data
 
   PipelineEndSNSTopic:
     Type: AWS::SNS::Topic
@@ -241,110 +231,6 @@ Resources:
                 - sns:Publish
                 Effect: Allow
                 Resource: '*'
-
-  CodeBuildServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Path: /
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - codebuild.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Resource: "*"
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - ecr:GetAuthorizationToken
-                  - ec2:*
-                  - lambda:*
-                  - iam:PassRole
-              - Resource: !Sub arn:aws:s3:::${TrainingInputBucket}*
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:GetObjectVersion
-                  - s3:ListObjects
-              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${Repository}
-                Effect: Allow
-                Action:
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:PutImage
-                  - ecr:InitiateLayerUpload
-                  - ecr:UploadLayerPart
-                  - ecr:CompleteLayerUpload
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
-        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
-
-  LambdaServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-                - sagemaker.amazonaws.com
-                - codepipeline.amazonaws.com
-                - codebuild.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Policies:
-        - PolicyName: LambdaPipelineRole
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Resource: "*"
-                Effect: Allow
-                Action:
-                  - ec2:DescribeVpcs
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeSecurityGroups
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:GetLogEvents
-                  - logs:PutLogEvents
-                  - ec2:CreateNetworkInterface
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DeleteNetworkInterface
-                  - ec2:DescribeDhcpOptions
-                  - ec2:DetachNetworkInterface
-                  - ec2:ModifyNetworkInterfaceAttribute
-                  - iam:PassRole
-                  - sns:Publish
-                  - lambda:InvokeFunction
-                  - cloudformation:DescribeStacks
-                  - codepipeline:*
-                  - codepipeline:PutJobSuccessResult
-                  - codepipeline:PutJobFailureResult
-                  - logs:*
-                  - s3:*
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
-        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
-        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
-        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
-        - arn:aws:iam::aws:policy/AWSCodePipelineFullAccess
 
   CustomS3FolderHandler:
     Type: Custom::CustomS3FolderHandler
@@ -395,7 +281,7 @@ Resources:
               print("got till here")
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData=None)
 
-  LambdaBuildTrigger:
+  LambdaCheckInputs:
     Type: AWS::Lambda::Function
     Properties:
       Description: Checks if CodePipeline pipeline exists and then manually executes it.
@@ -408,42 +294,61 @@ Resources:
       Role: !GetAtt 'LambdaServiceRole.Arn'
       Code:
         ZipFile: |
-          import os
-          import json
-          import boto3
-          import logging
+         import os
+         import json
+         import boto3
+         import logging
 
-          codepipeline = boto3.client('codepipeline')
+  LambdaPipelineTrigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Checks if CodePipeline pipeline exists and then manually executes it.
+      Environment:
+        Variables:
+          'PIPELINE': !Ref 'AWS::StackName'
+      Handler: index.lambda_handler
+      Runtime: python3.6
+      Timeout: '300'
+      Role: !GetAtt 'LambdaServiceRole.Arn'
+      Code:
+        ZipFile: |
+         import os
+         import json
+         import boto3
+         import logging
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+         codepipeline = boto3.client('codepipeline')
 
-          def lambda_handler(event, context):
-            logger.info('got event {}'.format(event))
+         logger = logging.getLogger()
+         logger.setLevel(logging.INFO)
 
-            pipelineName = str(os.environ["PIPELINE"])
 
-            response1 = codepipeline.list_pipeline_executions(pipelineName=str(pipelineName))
+         def lambda_handler(event, context):
+             logger.info('got event {}'.format(event))
 
-            if not response1['pipelineExecutionSummaries'][0]:
-              print('Kick off a new pipeline execution')
-              codepipeline.start_pipeline_execution(pipelineName=str(pipelineName))
-            else:
-              latest_execution = response1['pipelineExecutionSummaries'][0]
-              execution_status = str(latest_execution['status'])
+             pipelineName = str(os.environ["PIPELINE"])
 
-              if execution_status == 'InProgress':
-                print('Execution In Progress Do Nothing')
+             response1 = codepipeline.list_pipeline_executions(pipelineName=str(pipelineName))
 
-              if execution_status == 'Succeeded':
-                print('Restarting execution for Pipeline')
-                codepipeline.start_pipeline_execution(name=str(pipelineName))
+             if not response1['pipelineExecutionSummaries'][0]:
+                 print('Kick off a new pipeline execution')
+                 codepipeline.start_pipeline_execution(pipelineName=str(pipelineName))
+             else:
+                 latest_execution = response1['pipelineExecutionSummaries'][0]
+                 execution_status = str(latest_execution['status'])
 
-              if execution_status == 'Failed':
-                print('Restarting Failed execution for Pipeline')
-                codepipeline.start_pipeline_execution(name=str(pipelineName))
+                 if execution_status == 'InProgress':
+                     print('Execution In Progress Do Nothing')
 
-  CodeBuildProject:
+                 if execution_status == 'Succeeded':
+                     print('Restarting execution for Pipeline')
+                     codepipeline.start_pipeline_execution(name=str(pipelineName))
+
+                 if execution_status == 'Failed':
+                     print('Restarting Failed execution for Pipeline')
+                     codepipeline.start_pipeline_execution(name=str(pipelineName))
+
+  CodeBuildTrainingProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Artifacts:
@@ -491,6 +396,7 @@ Resources:
                 - echo "RUN apt-get -y update && apt-get install -y --no-install-recommends \ " >> Dockerfile
                 - echo "    build-essential \ " >> Dockerfile
                 - echo "    unixodbc-dev \ " >> Dockerfile
+                - echo "    nginx \ " >> Dockerfile
                 - echo "    libboost-python-dev \ " >> Dockerfile
                 - echo "    ca-certificates" >> Dockerfile
                 - echo "" >> Dockerfile
@@ -530,57 +436,107 @@ Resources:
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
           - Name: FULL_NAME
-            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}:latest
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${TrainingImageRepository}:latest
           - Name: REPO_NAME
             Value: !Sub ${GitHubRepo}
-      Name: !Ref AWS::StackName
+      Name: !Sub ${AWS::StackName}-train
       ServiceRole: !Ref CodeBuildServiceRole
       TimeoutInMinutes: !Ref BuildTimeoutMins
 
-  LambdaCheckInput:
-    Type: AWS::Lambda::Function
+  CodeBuildInferenceProject:
+    Type: AWS::CodeBuild::Project
     Properties:
-      Description: Checks if input data and config are present
+      Artifacts:
+        Type: CODEPIPELINE
+      Cache:
+        Type: NO_CACHE
+      Source:
+        Type: CODEPIPELINE
+        GitCloneDepth: 1
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - pip install --upgrade pip
+            pre_build:
+              commands:
+                - export IMG="${REPO_NAME}"
+                - export PAYLOAD={\"COMMIT_ID\":\"${CODEBUILD_RESOLVED_SOURCE_VERSION}\",\"IMG\":\"${REPO_NAME}\"}
+                - echo "${PAYLOAD}" > outfile.txt
+                - python setup.py egg_info
+                - export pkg_name=$(ps -ef | awk '{ if ($1 ~ /Name:/) print $2}' *.egg-info/PKG-INFO)
+                - export pkg_version=$(ps -ef | awk '{ if ($1 ~ /^Version:/) print $2}' *.egg-info/PKG-INFO)
+                - module_name=$(ps -ef | awk '{ if ($1 ~ /serve/) print $3 }' *.egg-info/entry_points.txt | cut -d ':' -f1 | sed -e 's/^"//' -e 's/"$//')
+                - function_name=$(ps -ef | awk '{ if ($1 ~ /serve/) print $3 }' *.egg-info/entry_points.txt | cut -d ':' -f2 | sed -e 's/^"//' -e 's/"$//')
+                - export module_name=$(echo $module_name)
+                - export function_name=$(echo $function_name)
+                - export dependencies=""
+                - |
+                  while read -r line
+                  do
+                       dependencies="$dependencies""$line "
+                  done < "${pkg_name}.egg-info/requires.txt"
+                - python setup.py sdist
+                - cd dist
+                - echo "# ------------------------------------------------------------------------------" >> Dockerfile
+                - echo "# Main" >> Dockerfile
+                - echo "# =======" >> Dockerfile
+                - echo "# Can be used as base image for regular inference job executions" >> Dockerfile
+                - echo "# ------------------------------------------------------------------------------" >> Dockerfile
+                - echo "" >> Dockerfile
+                - echo "FROM python:3.6-slim" >> Dockerfile
+                - echo "" >> Dockerfile
+                - echo "# Add standard build tools and libraries" >> Dockerfile
+                - echo "RUN apt-get -y update && apt-get install -y --no-install-recommends \ " >> Dockerfile
+                - echo "    build-essential \ " >> Dockerfile
+                - echo "    unixodbc-dev \ " >> Dockerfile
+                - echo "    nginx \ " >> Dockerfile
+                - echo "    libboost-python-dev \ " >> Dockerfile
+                - echo "    ca-certificates" >> Dockerfile
+                - echo "" >> Dockerfile
+                - echo "# Install any package-specific python requirements" >> Dockerfile
+                - echo "RUN pip install $dependencies" >> Dockerfile
+                - echo "" >> Dockerfile
+                - echo "# Copy over entrypoint script and define image entry"
+                - echo "COPY run.py /opt/run.py" >> Dockerfile
+                - echo "ENTRYPOINT ["'"python"'", "'"/opt/run.py"'"]" >> Dockerfile
+                - echo "" >> Dockerfile
+                - echo "# Copy and install inference code" >> Dockerfile
+                - echo "COPY $pkg_name-$pkg_version.tar.gz /opt/$pkg_name-$pkg_version.tar.gz" >> Dockerfile
+                - echo "RUN pip install /opt/$pkg_name-$pkg_version.tar.gz" >> Dockerfile
+                - echo "from $module_name import $function_name" >> run.py
+                - echo "$function_name()" >> run.py
+                - cat run.py
+                - cat Dockerfile
+                - cd ..
+            build:
+              commands:
+                - $(aws ecr get-login --region "${AWS_DEFAULT_REGION}" --no-include-email)
+                - docker build -t "${IMG}" ./dist
+                - docker tag "${IMG}" "${FULL_NAME}"
+            post_build:
+              commands:
+                - docker push "${FULL_NAME}"
+          artifacts:
+            files:
+              - outfile.txt
+            discard-paths: yes
       Environment:
-        Variables:
-          'ECR_REPO': !Ref Repository
-          'SRC_BKT_NAME': !Ref TrainingInputBucket
-          'META_DATA_STORE': !Ref MetaDataStore
-          'IMG': !Sub ${GitHubRepo}
-      Handler: index.main
-      Runtime: python3.6
-      Timeout: '300'
-      Role: !GetAtt 'LambdaServiceRole.Arn'
-      Code:
-        ZipFile: |
-          import os
-          import json
-          import boto3
-          import botocore
-          import shutil
-          import traceback
-
-          code_pipeline = boto3.client('codepipeline')
-          s3 = boto3.client('s3')
-
-          def main(event, context):
-            job_id = event['CodePipeline.job']['id']
-            try:
-              response3 = s3.list_objects(Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/data/', Prefix='input/data/')
-              if 'Contents' in response3:
-                object_list3 = list()
-                for key in response3['Contents']:
-                  object_list3.append(os.path.basename(key['Key']))
-                object_list4 = list(set(object_list3))
-                if len(object_list4) >= 1:
-                  if list(set(object_list4)) != ['']:
-                    print("Success: Training Data Already Exists")
-                    code_pipeline.put_job_success_result(jobId=job_id)
-                  else:
-                    print("Data Does Not Exist. Please Add Data")
-                    code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': 'Data Does Not Exist. Please Add Data', 'type': 'JobFailed'})
-            except Exception as e:
-              code_pipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': e, 'type': 'JobFailed'})
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: !Ref PythonBuildVersion
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: FULL_NAME
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${InferenceImageRepository}:latest
+          - Name: REPO_NAME
+            Value: !Sub ${GitHubRepo}
+      Name: !Sub ${AWS::StackName}-infer
+      ServiceRole: !Ref CodeBuildServiceRole
+      TimeoutInMinutes: !Ref BuildTimeoutMins
 
   LambdaSageMakerTrigger:
     Type: AWS::Lambda::Function
@@ -588,11 +544,11 @@ Resources:
       Description: Writes to DynamoDB and calls the SageMaker CreateTrainingJob API
       Environment:
         Variables:
-          'ECR_REPO': !Ref Repository
+          'ECR_REPO': !Ref TrainingImageRepository
           'SRC_BKT_NAME': !Ref TrainingInputBucket
           'META_DATA_STORE': !Ref MetaDataStore
           'IMG': !Sub ${GitHubRepo}
-          'FULL_NAME': !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}:latest
+          'FULL_NAME': !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${TrainingImageRepository}:latest
           'SAGE_ROLE_ARN': !GetAtt 'LambdaServiceRole.Arn'
           'INSTANCE_TYPE': !Ref InstanceType
           'INSTANCE_CNT': !Ref InstanceCount
@@ -606,69 +562,33 @@ Resources:
       Role: !GetAtt 'LambdaServiceRole.Arn'
       Code:
         S3Bucket: !Ref LambdasBucket
-        S3Key: !Ref LambdasKey
+        S3Key: !Ref
 
-  LambdaOutputTrigger:
+
+  LambdaDeployTrigger:
     Type: AWS::Lambda::Function
     Properties:
-      Description: This is triggered by Model Artifact being created in the output artifact bucket
+      Description: This is triggered by training job action being completed and kicking off Sagemaker hosting
       Environment:
         Variables:
           'META_DATA_STORE': !Ref MetaDataStore
-          'PIPELINE_END_TOPIC': !Ref PipelineEndSNSTopic
-      Handler: index.lambda_handler
+          'DEST_BKT': !Sub ${ModelArtifactBucket}
+          'FULL_NAME': !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${InferenceImageRepository}:latest
+          'IMG': !Sub ${GitHubRepo}
+          'SAGE_ROLE_ARN': !GetAtt 'LambdaServiceRole.Arn'
+      Handler: sagemaker-deploy-trigger.main
       Runtime: python3.6
       Timeout: '300'
       Role: !GetAtt 'LambdaServiceRole.Arn'
       Code:
-        ZipFile: |
-          import os
-          import json
-          import boto3
-          import logging
-
-          s3 = boto3.client('s3')
-          dynamodb = boto3.client('dynamodb')
-          sagemaker = boto3.client('sagemaker')
-          sns = boto3.client('sns')
-
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
-
-          def lambda_handler(event, context):
-
-            logger.info('got event{}'.format(event))
-
-            bkt_name = event['Records'][0]['s3']['bucket']['name']
-            obj_key = event['Records'][0]['s3']['object']['key']
-            version_id = event['Records'][0]['s3']['object']['versionId']
-            training_job_name = obj_key[ : obj_key.find("/")]
-
-            res = sagemaker.list_training_jobs()
-            for job in res['TrainingJobSummaries']:
-              if job['TrainingJobName'] == training_job_name:
-                job_status = str(job['TrainingJobStatus'])
-                job_creation_time = str(job['CreationTime'])
-                job_end_time = str(job['TrainingEndTime'])
-
-            dynamodb.update_item(
-              TableName=str(os.environ['META_DATA_STORE']),
-              Key={'training_job_name': {'S':training_job_name}},
-              UpdateExpression="SET #job_creation_time= :val1, #job_end_time= :val2, #job_status= :val3",
-              ExpressionAttributeNames={'#job_creation_time': 'job_creation_time', '#job_end_time': 'job_end_time', '#job_status':'job_status'},
-              ExpressionAttributeValues={':val1':{ 'S':job_creation_time}, ':val2':{ 'S':job_end_time}, ':val3':{ 'S':job_status}}
-            )
-            sns.publish(
-              TopicArn = str(os.environ['PIPELINE_END_TOPIC']),
-              Subject = 'Model Artifact Uploaded: ' + training_job_name,
-              Message = 'File was uploaded to bucket: ' + obj_key
-            )
+        S3Bucket: !Ref LambdasBucket
+        S3Key: !Ref LambdasKey
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       ArtifactStore:
-        Location: !Ref 'ArtifactStoreBucket'
+        Location: !Ref 'CodepipelineArtifactBucket'
         Type: S3
       DisableInboundStageTransitions: []
       Name: !Ref 'AWS::StackName'
@@ -692,36 +612,35 @@ Resources:
               RunOrder: '1'
         - Name: Build
           Actions:
-            - Name: Build_Push
+            - Name: Build_Training_Image
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
                 Version: '1'
               Configuration:
-                ProjectName: !Ref 'CodeBuildProject'
+                ProjectName: !Ref 'CodeBuildTrainingProject'
               InputArtifacts:
                 - Name: src
               OutputArtifacts:
                 - Name: bld
               RunOrder: '1'
-        - Name: Validate_Inputs
-          Actions:
-            - Name: CheckData
+            - Name: Build_Inference_Image
               ActionTypeId:
-                Category: Invoke
+                Category: Build
                 Owner: AWS
-                Provider: Lambda
+                Provider: CodeBuild
                 Version: '1'
               Configuration:
-                FunctionName: !Ref 'LambdaCheckInput'
+                ProjectName: !Ref 'CodeBuildInferenceProject'
               InputArtifacts:
-                - Name: bld
-              OutputArtifacts: []
+                - Name: src
+              OutputArtifacts:
+                - Name: bldi
               RunOrder: '1'
-        - Name: SageMaker_Training
+        - Name: SageMaker
           Actions:
-            - Name: SageMakerTrigger
+            - Name: SageMaker_Train
               ActionTypeId:
                 Category: Invoke
                 Owner: AWS
@@ -734,6 +653,134 @@ Resources:
               OutputArtifacts:
                 - Name: trigger
               RunOrder: '1'
+            - Name: SageMaker_Deploy
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Provider: Lambda
+                Version: '1'
+              Configuration:
+                FunctionName: !Ref 'LambdaDeployTrigger'
+              InputArtifacts:
+                - Name: trigger
+              RunOrder: '2'
+        - Name: Production
+          Actions:
+            - Name: ApprovalGate
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                NotificationArn: !Ref PipelineEndSNSTopic
+                CustomData: !Sub 'Do you want to push your changes to production?'
+              RunOrder: '1'
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+                  - lambda:*
+                  - iam:PassRole
+              - Resource: !Sub arn:aws:s3:::${TrainingInputBucket}*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                  - s3:ListObjects
+              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  LambdaServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - sagemaker.amazonaws.com
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPipelineRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DeleteNetworkInterfacePermission
+                  - ec2:CreateNetworkInterfacePermission
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DetachNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:GetLogEvents
+                  - logs:PutLogEvents
+                  - iam:PassRole
+                  - sns:Publish
+                  - lambda:InvokeFunction
+                  - cloudformation:DescribeStacks
+                  - codepipeline:*
+                  - codepipeline:PutJobSuccessResult
+                  - codepipeline:PutJobFailureResult
+                  - logs:*
+                  - s3:*
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AWSCodePipelineFullAccess
 
 Outputs:
   PipelineUrl:
@@ -752,5 +799,5 @@ Outputs:
 
   MetaDataStore:
     Description: >
-      DynamoDB Table grouping related artifacts together
+      DynamoDB Table Acting as Meta Data Store for Training job execution
     Value: !Sub https://console.aws.amazon.com/dynamodb/home?region=${AWS::Region}#tables:selected=${MetaDataStore};tab=items

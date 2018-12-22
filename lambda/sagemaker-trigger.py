@@ -5,6 +5,7 @@ import boto3
 import botocore
 import zipfile
 import tempfile
+
 from boto3.session import Session
 
 boto3.set_stream_logger(level=1)
@@ -12,6 +13,7 @@ ArtifactFileName = "outfile.txt"
 codepipeline = boto3.client('codepipeline')
 sagemaker = boto3.client('sagemaker')
 dynamodb = boto3.client('dynamodb')
+
 
 def get_artifact(s3, bucketName, objectKey):
     """
@@ -28,10 +30,39 @@ def get_artifact(s3, bucketName, objectKey):
         with zipfile.ZipFile(tmp_file.name, 'r') as zip:
             return zip.read(ArtifactFileName)
 
+
+def create_data_config(bucket_uri, bucket_name, s3):
+    """
+    this function takes in the TrainingInputBucket name for this particular and returns the relevant inputDataConfig
+    param of the sagemaker CreateTrainingJob API
+    :param bucket: str
+    :return: list of dicts
+    """
+
+    input_data_config = list()
+    for ii in ['training', 'testing', 'validation']:
+        resp = s3.list_objects(Bucket=bucket_name, Prefix='input/data/{}/'.format(ii))
+        if resp['Contents']:
+            for k in resp['Contents']:
+                if k['Size'] > 0:
+                    input_data_config.append(
+                        {
+                            'ChannelName': str(ii),
+                            'DataSource': {
+                                'S3DataSource': {
+                                    'S3DataType': 'S3Prefix',
+                                    'S3Uri': str(bucket_uri) + str(ii) + "/"
+                                }
+                            }
+                        }
+                    )
+    return input_data_config
+
+
 def main(event, context):
     """
-    :param event:
-    :param context:
+    :param event: Lambda event dict
+    :param context: lamnda context
     :return: None
 
     This function gathers the information like git hash of source as well as s3 data obj versions and inputs them to a
@@ -40,12 +71,16 @@ def main(event, context):
 
     job_id = event['CodePipeline.job']['id']
     job_data = event['CodePipeline.job']['data']
-    print(event)
     try:
         input_artifact = job_data['inputArtifacts'][0]
-        credentials = job_data['artifactCredentials']
         from_bucket = input_artifact['location']['s3Location']['bucketName']
         from_key = input_artifact['location']['s3Location']['objectKey']
+
+        output_artifact = job_data['outputArtifacts'][0]
+        to_bucket = output_artifact['location']['s3Location']['bucketName']
+        to_key = output_artifact['location']['s3Location']['objectKey']
+
+        credentials = job_data['artifactCredentials']
         key_id = credentials['accessKeyId']
         key_secret = credentials['secretAccessKey']
         session_token = credentials['sessionToken']
@@ -85,14 +120,6 @@ def main(event, context):
                                                                                   'type': 'JobFailed'})
 
         else:
-            session = Session(aws_access_key_id=key_id, aws_secret_access_key=key_secret,aws_session_token=session_token)
-            s3 = session.client('s3', config=botocore.client.Config(signature_version='s3v4'))
-
-            docs = get_artifact(s3, from_bucket, from_key)
-            if (docs):
-                docs_dict = json.loads(docs.decode("utf-8"))
-                git_hash = docs_dict['COMMIT_ID']
-
             s3 = boto3.client('s3')
 
             response5 = s3.list_objects(Bucket=str(os.environ["SRC_BKT_NAME"]), Marker='input/config/', Prefix='input/config/')
@@ -106,6 +133,18 @@ def main(event, context):
                     result = s3.get_object(Bucket=str(os.environ["SRC_BKT_NAME"]), Key=object_list5[0])
                     text = result["Body"].read().decode()
                     hyper_param_dict = json.loads(text)
+
+            input_hyperparams = dict()
+            for key in hyper_param_dict.keys():
+                dict_entry = {'S': str(hyper_param_dict[key])}
+                input_hyperparams.update({str(key): dict_entry})
+
+
+            input_data_config = create_data_config(
+                bucket_uri=str(os.environ["SRC_BKT_URI"]),
+                bucket_name=str(os.environ['SRC_BKT_NAME']),
+                s3=s3
+            )
 
             s3_key_version_dict = dict()
             versions = s3.list_object_versions(Bucket=str(os.environ["SRC_BKT_NAME"]), Prefix='input/')
@@ -121,18 +160,36 @@ def main(event, context):
                         version_id = {'S': str(VersionId)}
                         s3_key_version_dict.update({key_name: version_id})
 
+            session = Session(aws_access_key_id=key_id, aws_secret_access_key=key_secret,aws_session_token=session_token)
+            s3 = session.client('s3', config=botocore.client.Config(signature_version='s3v4'))
+
+            docs = get_artifact(s3, from_bucket, from_key)
+            if (docs):
+                docs_dict = json.loads(docs.decode("utf-8"))
+                git_hash = docs_dict['COMMIT_ID']
+
             training_job_name = str(os.environ["IMG"]) + '-' + str(datetime.datetime.today()).replace(' ', '-').replace(':', '-').rsplit('.')[0]
+
+            s3.put_object(Body=json.dumps({"training_job_name": training_job_name}), Bucket=to_bucket, Key=to_key)
 
             dynamodb.put_item(
                 TableName=str(os.environ["META_DATA_STORE"]),
                 Item={
                     'training_job_name': {'S': training_job_name},
+                    'instance_type': {'S': str(os.environ["INSTANCE_TYPE"])},
+                    'instance_count': {'N': str(os.environ["INSTANCE_CNT"])},
+                    'instance_vol_in_gigs': {'N': str(os.environ["EBS_VOL_GB"])},
                     'git_hash': {'S': str(git_hash)},
-                    's3_input': {'M': s3_key_version_dict}
+                    'training_image_uri': {'S': str(os.environ["FULL_NAME"]) },
+                    'input_bucket_name': {'S': str(os.environ["SRC_BKT_NAME"])},
+                    'input_key_versions': {'M': s3_key_version_dict},
+                    'input_hyperparms': {'M': input_hyperparams}
                 }
             )
 
-            sagemaker.create_training_job(
+            hyper_param_dict.update({'meta_data_store': str(os.environ["META_DATA_STORE"])})
+
+            sage_res = sagemaker.create_training_job(
                 TrainingJobName=training_job_name,
                 HyperParameters=hyper_param_dict,
                 AlgorithmSpecification={
@@ -140,35 +197,7 @@ def main(event, context):
                     'TrainingInputMode': 'File'
                 },
                 RoleArn=str(os.environ["SAGE_ROLE_ARN"]),
-                InputDataConfig=[
-                    {
-                        'ChannelName': 'training',
-                        'DataSource': {
-                            'S3DataSource': {
-                                'S3DataType': 'S3Prefix',
-                                'S3Uri': str(os.environ["SRC_BKT_URI"]) + "training/"
-                            }
-                        }
-                    },
-                    {
-                        'ChannelName': 'testing',
-                        'DataSource': {
-                            'S3DataSource': {
-                                'S3DataType': 'S3Prefix',
-                                'S3Uri': str(os.environ["SRC_BKT_URI"]) + "testing/"
-                            }
-                        }
-                    },
-                    {
-                        'ChannelName': 'validation',
-                        'DataSource': {
-                            'S3DataSource': {
-                                'S3DataType': 'S3Prefix',
-                                'S3Uri': str(os.environ["SRC_BKT_URI"]) + "validation/"
-                            }
-                        }
-                    }
-                ],
+                InputDataConfig=input_data_config,
                 ResourceConfig={
                     'InstanceType': str(os.environ["INSTANCE_TYPE"]),
                     'InstanceCount': int(os.environ["INSTANCE_CNT"]),
@@ -178,6 +207,10 @@ def main(event, context):
                 StoppingCondition={'MaxRuntimeInSeconds': int(os.environ["RUN_TIME_SEC"])}
             )
 
-            codepipeline.put_job_success_result(jobId=job_id, continuationToken=training_job_name)
+            if('TrainingJobArn' in sage_res.keys()):
+                codepipeline.put_job_success_result(jobId=job_id, continuationToken=training_job_name)
+            else:
+                codepipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': 'Invalid Request',
+                                                                                  'type': 'JobFailed'})
     except Exception as e:
-        codepipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': e, 'type': 'JobFailed'})
+        codepipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': str(e), 'type': 'JobFailed'})

@@ -1,12 +1,12 @@
 #!/bin/bash
-AWS_DEFAULT_REGION="<ENTER AWS REGION>"
-Email="<ENTER EMAIL ADDRESS FOR PIPELINE NOTIFICATION>"
+AWS_DEFAULT_REGION="us-east-1"
+Email="<ENTER-EMAIL-HERE>"
 
 # Parameters to Configure Specific Github Repo
-GitHub_User="<ENTER YOUR GITHUB USER NAME>"
-GitHub_Repo="<ENTER NAME (ONLY) OF GITHUB REPOSITORY>"
-GitHub_Branch="<ENTER NAME OF GIT BRANCH THAT WILL TRIGGER PIPELINE>"
-GitHub_Token="<ENTER GITHUB PERSONAL ACCESS TOKEN>"
+GitHub_User="MustafaWaheed91"
+GitHub_Repo="tf-gamesbiz"
+GitHub_Branch="master"
+GitHub_Token="<ENTER-GITHUB-TOKEN-HERE>"
 
 # CodeBuild Project Parameters
 Python_Build_Version="aws/codebuild/python:3.6.5-1.3.2"
@@ -14,13 +14,13 @@ Build_Timeout_Mins=30
 
 # SageMaker Training Job Parameters
 Instance_Count=1
-Instance_Type="ml.m4.4xlarge"
+Instance_Type="ml.m4.xlarge"
 Max_Runtime_In_Seconds=86400
-Vol_In_GB=30
+Vol_In_GB=60
 
-Template_Name="${GitHub_Repo}-cicd-pipeline"
+Template_Name="${GitHub_Repo}-cicd-pipeline-test"
 Lambdas_Bucket="${Template_Name}-lambdas-`date '+%Y-%m-%d-%H-%M-%S'`"
-Lambdas_Key="SageMakerTrigger/LambdaFunction.zip"
+Lambdas_Key="SageMakerTriggers/LambdaFunction.zip"
 
 cd lambda
 
