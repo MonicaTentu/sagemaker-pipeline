@@ -14,6 +14,7 @@ The pipeline is executed whenever
 
 **Note**: This pipeline consumes code in the github repository branch that is laid out as a python package with a setup.py file in the root of the repository along with the module folder.
 
+----
 
 ### Step 1: Setup AWS Account
 
