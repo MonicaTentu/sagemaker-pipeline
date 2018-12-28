@@ -1,4 +1,4 @@
-## CICD Pipeline for Training and Deploying Machine Learning Models with Amazon SageMaker
+## CICD Pipeline for Deploying AI/ML Microservice using Amazon SageMaker
 
 ![Design Overview](./images/sagemaker-pipeline.png)
 
