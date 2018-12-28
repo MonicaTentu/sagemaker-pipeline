@@ -207,7 +207,7 @@ def main(event, context):
                 StoppingCondition={'MaxRuntimeInSeconds': int(os.environ["RUN_TIME_SEC"])}
             )
 
-            if('TrainingJobArn' in sage_res.keys()):
+            if 'TrainingJobArn' in sage_res.keys():
                 codepipeline.put_job_success_result(jobId=job_id, continuationToken=training_job_name)
             else:
                 codepipeline.put_job_failure_result(jobId=job_id, failureDetails={'message': 'Invalid Request',

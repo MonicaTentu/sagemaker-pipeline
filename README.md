@@ -1,15 +1,16 @@
-## CICD Pipeline for Training Custom Models with Amazon SageMaker
+## CICD Pipeline for Training and Deploying Machine Learning Models with Amazon SageMaker
 
 ![Design Overview](./images/sagemaker-pipeline.png)
 
 ### Project Summary
 
-The aim of this project is to present a minimum viable machine learning pipeline which continuously builds a docker image of any custom Machine Learning/Deep Learning model in python and invokes a SageMaker job to train it.
+The aim of this project is to present a minimum viable machine learning pipeline for training and hosting a custom Machine Learning/Deep Learning model in python with a REST endpoint exposed for inference.
+This pipeline continuously builds training and inference docker image for your custom model and then invokes a SageMaker job to train it and after training deploys an SageMaker enpoint for inferece.
 The pipeline resources can be provisioned in AWS by creating a CloudFormation stack from the template provided here: [*template/sagemaker-pipeline.yaml*](https://github.com/MustafaWaheed91/sagemaker-pipeline/blob/master/template/sagemaker-pipeline.yaml)
 
 The pipeline is executed whenever
 * A new commit is pushed to the Github repository branch you specify in the CloudFormation template
-* A data or config objects are created or updated in the training input bucket under the S3 key */input* 
+* A data or config objects are created or updated in the training input bucket under the S3 key */input*
 
 **Note**: This pipeline consumes code in the github repository branch that is laid out as a python package with a setup.py file in the root of the repository along with the module folder.
 
@@ -30,10 +31,10 @@ In order to use this pipeline its expected that your model algorithm is packaged
 
 To learn more about packaging python code [see here](https://python-packaging.readthedocs.io/en/latest/). Also **please note** that you would need to get a personal access token for the pipeline to link to your source repo in Github.
 
-[Check this repository](https://github.com/MustafaWaheed91/tf-gamesbiz) to see an example of a compatible packaged python model that can be consumed by this pipeline.
-Feel free to check the repository and the packaged module "gamesbiz" inside. The the training algorithm is in the module *train.py* implemented as a function named "entry_point()".
+Check out [this repository](https://github.com/MustafaWaheed91/tf-gamesbiz) as an example of a packaged python model that can be consumed by this pipeline.
+Feel free to clone [this repository](https://github.com/MustafaWaheed91/tf-gamesbiz) and the packaged module "gamesbiz" inside.
 
-You can also fork [this example repository](https://github.com/MustafaWaheed91/tf-gamesbiz) to test out this pipeline:
+**Note**: The the training algorithm is in the module *train.py* implemented as a function named "entry_point()" and the inference code is in *serve.py* with its entrypoint function also specified in setup.py
 
 As you can see the root level of your Github repo has a *setup.py* file present there along with the package module directory (as is convention).
 In order to use this CICD pipeline with your packaged python code you need to add an "entry_points" argument in your *setup.py* file in the "setup()" function.
@@ -41,7 +42,7 @@ In order to use this CICD pipeline with your packaged python code you need to ad
 This additional "entry_points" argument provides all the information the pipeline needs to build a SageMaker compatible docker image.
 You can see this in the *setup.py* file for the [example repo](https://github.com/MustafaWaheed91/tf-gamesbiz) where the function is named "entry_point()" as well.
 
-Make sure to keep "train" keyword on the LHS of the "=" when specifying the entry point string as seen in the juxtaposition below.
+Make sure to keep "train" and "serve" keywords on the LHS of the "=" when specifying the entry point string as seen in the juxtaposition below.
 
 ```
 setup(
@@ -51,6 +52,9 @@ setup(
     entry_points={
        "gamesbiz.training": [
            "train=gamesbiz.train:entry_point",
+       ],
+       "gamesbiz.hosting": [
+           "serve=gamesbiz.server:start_server",
        ]
     }
 
@@ -65,8 +69,11 @@ setup(
     ....
 
     entry_points={
-        "<ENTER ANY TEXT>" : [
+        "<PACKAGE NAME>.<ENTER ANY TEXT>" : [
             "train = <ENTER MODULE PATH TO FUNCTION TO BE INVOKED>:<ENTER NAME OF FUNCTION>"
+        ]
+        "<PACKAGE NAME>.<ENTER ANY TEXT>" : [
+            "serve = <ENTER MODULE PATH TO FUNCTION TO BE INVOKED>:<ENTER NAME OF FUNCTION>"
         ]
     }
 

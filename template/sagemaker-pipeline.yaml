@@ -562,8 +562,7 @@ Resources:
       Role: !GetAtt 'LambdaServiceRole.Arn'
       Code:
         S3Bucket: !Ref LambdasBucket
-        S3Key: !Ref
-
+        S3Key: !Ref LambdasKey
 
   LambdaDeployTrigger:
     Type: AWS::Lambda::Function
