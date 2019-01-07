@@ -33,7 +33,7 @@ def get_artifact(s3, bucketName, objectKey):
 
 def create_data_config(bucket_uri, bucket_name, s3):
     """
-    this function takes in the TrainingInputBucket name for this particular and returns the relevant inputDataConfig
+    This function takes in the TrainingInputBucket name for this particular and returns the relevant inputDataConfig
     param of the sagemaker CreateTrainingJob API
     :param bucket: str
     :return: list of dicts
@@ -61,12 +61,13 @@ def create_data_config(bucket_uri, bucket_name, s3):
 
 def main(event, context):
     """
-    :param event: Lambda event dict
-    :param context: lamnda context
-    :return: None
+    This function creates the sagemaker training job at the codepipeline execution runtime.
+    It also writes relevant attributes of the pipeline execution to the DynamoDB meta data store
 
-    This function gathers the information like git hash of source as well as s3 data obj versions and inputs them to a
-    DynamoDB table it then launches a SageMaker Training job.
+    :param event: Lambda event dict
+    :param context: lamnda context object defined in the environment
+    :return: The function stops when codepipeline is sent a response without the continuation token
+
     """
 
     job_id = event['CodePipeline.job']['id']

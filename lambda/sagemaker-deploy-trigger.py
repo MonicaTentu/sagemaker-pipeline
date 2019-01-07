@@ -1,7 +1,6 @@
 import os
 import json
 import datetime
-import tarfile
 import boto3
 import botocore
 import tempfile
@@ -18,7 +17,15 @@ sagemaker = boto3.client('sagemaker')
 dynamodb = boto3.client('dynamodb')
 
 
-def main(event, context):
+def main(event,context):
+    """
+    This function deploys the Inference Endpoint for the model generated at codepipeline execution runtime
+    Calls to DynamoDB meta data store are also made to keep track of changes to environment in previous stage.
+
+    :param event: is the event object that is passed when lambda function is triggered
+    :param context: Another object passed to the environment
+    :return: The function ends once a response has been given without the continuation token
+    """
     job_id = event['CodePipeline.job']['id']
     job_data = event['CodePipeline.job']['data']
     try:
@@ -31,7 +38,6 @@ def main(event, context):
         session_token = credentials['sessionToken']
 
         if "continuationToken" in job_data:
-            ## collect the value of the continuation token and describe sagemaker endpoint
             continuation_token = job_data["continuationToken"]
 
             res = sagemaker.describe_endpoint(EndpointName=str(continuation_token))
@@ -104,27 +110,6 @@ def main(event, context):
                                                    }
                     )
 
-            s3 = boto3.client('s3')
-            try:
-                s3.download_file(str(os.environ['DEST_BKT']), '{}/output/model.tar.gz'.format(str(training_job_name)), '/tmp/file')
-                if tarfile.is_tarfile('/tmp/file'):
-                    tar = tarfile.open('/tmp/file', "r:gz")
-                    for TarInfo in tar:
-                        tar.extract(TarInfo.name, path='/tmp/extract/')
-            except Exception as e:
-                print(e)
-                raise e
-
-            training_cost_per_epoch = dict()
-            testing_cost_per_epoch = dict()
-            with open('/tmp/extract/cost.json') as cost_file:
-                cost_json = json.load(cost_file)
-            for key in cost_json.keys():
-                dict_entry_train = {'S': str(cost_json[key]['training_cost'])}
-                training_cost_per_epoch.update({str(key): dict_entry_train})
-                dict_entry_test = {'S': str(cost_json[key]['testing_cost'])}
-                testing_cost_per_epoch.update({str(key): dict_entry_test})
-
             inference_img_uri = str(os.environ['FULL_NAME'])
             endpoint_name = str(os.environ["IMG"]) + '-' + str(datetime.datetime.today()).replace(' ', '-').replace(':', '-').rsplit('.')[0]
             model_name = 'model-' + str(endpoint_name)
@@ -153,16 +138,15 @@ def main(event, context):
             dynamodb.update_item(
                 TableName=str(os.environ['META_DATA_STORE']),
                 Key={'training_job_name': {'S': training_job_name}},
-                UpdateExpression="SET #training_cost_per_epoch= :val1, #testing_cost_per_epoch= :val2, #inference_image_uri= :val3, #model_name= :val4, #endpoint_config_name= :val5, #endpoint_name= :val6",
-                ExpressionAttributeNames={'#training_cost_per_epoch': 'training_cost_per_epoch',
-                                          '#testing_cost_per_epoch': 'testing_cost_per_epoch',
+                UpdateExpression="SET #inference_image_uri= :val3, #model_name= :val4, #endpoint_config_name= :val5, " +
+                                 "#endpoint_name= :val6",
+                ExpressionAttributeNames={
                                           '#inference_image_uri': 'inference_image_uri',
                                           '#model_name': 'model_name',
                                           '#endpoint_config_name': 'endpoint_config_name',
                                           '#endpoint_name': 'endpoint_name'
                                           },
-                ExpressionAttributeValues={':val1': {'M': training_cost_per_epoch},
-                                           ':val2': {'M': testing_cost_per_epoch},
+                ExpressionAttributeValues={
                                            ':val3': {'S': inference_img_uri},
                                            ':val4': {'S': model_name},
                                            ':val5': {'S': endpoint_config_name},
