@@ -4,7 +4,7 @@ Email="mtentu@phdata.io"
 
 # Parameters to Configure Specific Github Repo
 GitHub_User="MonicaTentu"
-GitHub_Repo="gamesbiz"
+GitHub_Repo="barebones"
 GitHub_Branch="master"
 GitHub_Token="3b3022d7c647def3fe5ae5afc95bbb044ec8cd4f"	
 
@@ -14,9 +14,9 @@ Build_Timeout_Mins=30
 
 # SageMaker Training Job Parameters
 Instance_Count=1
-Instance_Type="ml.m4.4xlarge"
+Instance_Type="ml.p2.xlarge"
 Max_Runtime_In_Seconds=86400
-Vol_In_GB=60
+Vol_In_GB=30
 
 Template_Name="${GitHub_Repo}-cicd-pipeline"
 Lambdas_Bucket="${Template_Name}-lambdas-`date '+%Y-%m-%d-%H-%M-%S'`"
