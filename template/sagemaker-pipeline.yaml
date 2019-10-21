@@ -21,7 +21,7 @@ Parameters:
 
   GitHubRepo:
     Type: String
-    Default: tf-gamesbiz
+    Default: barebones
     Description: The repo name of the sample service.
 
   GitHubBranch:
@@ -55,7 +55,7 @@ Parameters:
   InstanceType:
     Description: Type of SageMaker Compute Instance
     Type: String
-    Default: ml.m4.4xlarge
+    Default: ml.p2.xlarge
 
   MaxRuntimeInSeconds:
     Type: Number
